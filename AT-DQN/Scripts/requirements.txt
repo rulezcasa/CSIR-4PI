@@ -1,0 +1,8 @@
+numpy
+gym
+torch
+torchvision
+torchaudio
+wandb
+tqdm
+
