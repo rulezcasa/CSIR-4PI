@@ -11,8 +11,8 @@ run_in_tmux() {
 
     tmux kill-session -t $SESSION_NAME 2>/dev/null
 
-    tmux new-session -d -s $SESSION_NAME "source activate $ENV_NAME && python $SCRIPT_NAME"
-    
+    tmux new-session -d -s $SESSION_NAME "export WANDB_API_KEY=bb9c65d370b2dd4ecf18c352a8e6b0a8ec928a22 && conda activate $ENV_NAME && python $SCRIPT_NAME"
+
     echo "Started $SCRIPT_NAME in tmux session '$SESSION_NAME' and detached."
 }
 
@@ -28,5 +28,3 @@ for i in "${!FILES[@]}"; do
 done
 
 echo "All scripts are running in separate tmux sessions and detached."
-
-
