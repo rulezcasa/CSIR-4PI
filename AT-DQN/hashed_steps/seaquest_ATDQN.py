@@ -38,7 +38,7 @@ def log_into_file(episode,episode_length,total_reward):
     
     logging.info(
         f"At episode {episode}:\n"
-        f"Episode length: {episode_length}\n"
+        f"Episode length (steps): {episode_length}\n"
         f"reward: {total_reward}\n"
         f"CPU: {cpu_usage:.2f}%, RAM: {ram_usage:.2f}%, GPU: {gpu_usage:.2f}%, GPU Memory: {gpu_memory:.2f}%\n"
         )
