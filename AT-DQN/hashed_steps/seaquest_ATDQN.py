@@ -94,7 +94,7 @@ class ReplayBuffer:
         
         
 class ATDQNAgent:
-    def __init__(self, action_size, state_shape, tau=0.5, beta_start=0.4, beta_end=1.0, T=1_000_000, device="cuda"):
+    def __init__(self, action_size, state_shape, tau=0.5, beta_start=0.4, beta_end=1.0, T=50000000, device="cuda"):
         self.action_size = action_size
         self.device = device
 
@@ -188,7 +188,7 @@ class ATDQNAgent:
         self.beta = min(self.beta + self.delta_beta, self.beta_end)
 
 
-wandb.init(project="AT-DQN", name="Seaquest_steps", config={"total_steps": 10000000})
+wandb.init(project="AT-DQN", name="Seaquest_steps", config={"total_steps": 50000000})
 reward_td_table = wandb.Table(columns=["Reward", "Mean loss"])
 env = gym.make('ALE/Seaquest-v5')
 state, _ = env.reset()
@@ -196,7 +196,7 @@ state_shape = (4, 84, 84)
 action_size = env.action_space.n
 agent = ATDQNAgent(action_size, state_shape, device="cuda" if torch.cuda.is_available() else "cpu")
 
-total_steps = 10000000  # Training for 10 million steps
+total_steps = 50000000  # Training for 10 million steps
 reward_memory = deque(maxlen=100)
 total_cumulative_reward = 0
 state = preprocess_frame(state)
