@@ -80,7 +80,7 @@ class QNetwork(nn.Module):
         	
 # Replay Buffer for Experience Replay
 class ReplayBuffer:
-    def __init__(self, capacity=100000):
+    def __init__(self, capacity=1000000):
         self.buffer = deque(maxlen=capacity)
 
     def add(self, experience):
