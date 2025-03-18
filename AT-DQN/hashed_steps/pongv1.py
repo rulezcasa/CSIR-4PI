@@ -95,7 +95,7 @@ class ReplayBuffer:
         
         
 class ATDQNAgent:
-    def __init__(self, action_size, state_shape, tau=0.3, beta_start=0.4, beta_end=1.0, T=20000000, device="cuda"):
+    def __init__(self, action_size, state_shape, tau=0.5, beta_start=0.4, beta_end=1.0, T=20000000, device="cuda"):
         self.action_size = action_size
         self.device = device
 
@@ -115,6 +115,8 @@ class ATDQNAgent:
         self.beta_end = beta_end
         self.delta_beta = (beta_end - beta_start) / T  # Beta annealing per step
         self.step_count = 0
+        self.exploration_count = 0
+        self.exploitation_count = 0
 
     #sha-256 hashing for efficient memory utilisation
     def get_state_hash(self, state):
@@ -133,9 +135,6 @@ class ATDQNAgent:
         priority = (abs(td_error) + 1e-6) ** 0.5
         importance_weight = (1 / (priority)) ** self.beta
         return importance_weight
-
-    self.exploration_count = 0
-    self.exploitation_count = 0
     
     def act(self, state):
         if self.get_attention(state) < self.tau:
@@ -169,7 +168,9 @@ class ATDQNAgent:
         importance_weights = torch.FloatTensor([
             self.compute_importance_weight(td_errors[i]) for i in range(32)
         ]).to(self.device)
-        importance_weights /= importance_weights.max() # normalizing : [0,1]
+        # mix max normalizing : [0,1]
+        importance_weights = (importance_weights - importance_weights.min()) / (importance_weights.max() - importance_weights.min() + 1e-6)
+
 
         # using importance weights to update attention for the batch
         for i in range(32):
@@ -213,21 +214,21 @@ episode_length=0
 td_errors_per_episode = []  
 
 for step in tqdm(range(total_steps), desc="Training Progress"):
-    episode_length += 1 #tracking episode length in steps
+    episode_length += 1  # Tracking episode length in steps
     action = agent.act(state_stack)
     next_frame, reward, done, _, _ = env.step(action)
     next_frame = preprocess_frame(next_frame)
     next_state_stack = np.concatenate((state_stack[1:], np.expand_dims(next_frame, axis=0)), axis=0)
 
     agent.replay_buffer.add((state_stack, action, reward, next_state_stack, done))
-    loss, td_error = agent.train_step()
+    result = agent.train_step()
 
     state_stack = next_state_stack
     total_reward += reward
-    if loss is not None:
+    if result is not None:
+        loss, td_error = result
         losses.append(loss)
-        td_errors_per_episode.append(td_error)  # Track TD errors per step	
-    
+        td_errors_per_episode.append(td_error)  # Track TD errors per step
 
     if done:
         episode += 1
@@ -243,25 +244,28 @@ for step in tqdm(range(total_steps), desc="Training Progress"):
             "Mean TD Error per episode": mean_td_error,  
         })
         
-        #log every 10 episodes
+        # Log every 10 episodes
         if episode % 10 == 0:
-    	    attention_values = list(agent.alpha.values())  # Extract all attention weights
-    	    if attention_values:  # Ensure there are values to log
+            attention_values = list(agent.alpha.values())  # Extract all attention weights
+            if attention_values:  # Ensure there are values to log
                 wandb.log({
                     "Attention Mean": np.mean(attention_values),
                     "Attention Std": np.std(attention_values),
                     "Attention Min": np.min(attention_values),
                     "Attention Max": np.max(attention_values),
-               })
-        
-	if episode % 100 == 0:
-    	    log_into_file(episode, episode_length, total_reward, agent.step_count)
-    	    wandb.log({
+                })
+
+        # Log every 100 episodes
+        if episode % 100 == 0:
+            #print(f"Episode {episode}: Mean α = {np.mean(list(agent.alpha.values()))}, τ = {agent.tau}")
+            log_into_file(episode, episode_length, total_reward, agent.step_count)
+            wandb.log({
                 "Total Explored States every 100 episodes": agent.exploration_count,
-        	"Total Exploited States every 100 episodes": agent.exploitation_count
-    	    })
+                "Total Exploited States every 100 episodes": agent.exploitation_count
+            })
             agent.exploration_count = 0
             agent.exploitation_count = 0
+
  
         state, _ = env.reset()
         state = preprocess_frame(state)
