@@ -1,3 +1,12 @@
+
+                                    #ISSUES
+###################################################################################
+# Inverse importance weight comparision with tau.
+# No logs for exploration score, exploitation score, attention (min. max. std.).
+# Incorrect importance weight computation accounting for buffer size N.
+####################################################################################
+
+
 import numpy as np
 import gym
 import torch
