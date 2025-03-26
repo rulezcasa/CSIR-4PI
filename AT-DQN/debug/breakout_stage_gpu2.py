@@ -62,7 +62,7 @@ class QNetwork(nn.Module):
 
 # Replay Buffer for Experience Replay (modified to use gpu)
 class ReplayBuffer:
-    def __init__(self, capacity=1000000, device="mps"):
+    def __init__(self, capacity=1000000, device="cuda"):
         self.buffer = deque(maxlen=capacity)
         self.device=device
 
@@ -88,7 +88,7 @@ class ATDQNAgent:
         beta_start=0.4,
         beta_end=1.0,
         T=20000000,
-        device="mps",
+        device="cuda",
     ):
         self.action_size = action_size
         self.device = device
@@ -220,7 +220,7 @@ state, _ = env.reset()
 state_shape = (4, 84, 84)
 action_size = env.action_space.n
 agent = ATDQNAgent(
-    action_size, state_shape, device="mps"
+    action_size, state_shape, device="cuda"
 )
 
 total_steps = 20000000  # Training for 20 million steps
