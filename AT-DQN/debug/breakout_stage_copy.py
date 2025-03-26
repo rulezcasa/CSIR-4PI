@@ -62,12 +62,12 @@ class QNetwork(nn.Module):
 
 # Replay Buffer for Experience Replay (modified to use gpu)
 class ReplayBuffer:
-    def __init__(self, capacity=1000000, device="cuda"):
+    def __init__(self, capacity=1000000, device="mps"):
         self.buffer = deque(maxlen=capacity)
         self.device=device
 
     def add(self, experience):
-        self.buffer.append(tuple(torch.tensor(x, device=self.device, dtype=torch.float32) for x in experience))
+        self.buffer.append(tuple(torch.as_tensor(x, dtype=torch.float32, device=self.device) for x in experience))
 
     def sample(self, batch_size):
         indices = torch.randint(0, len(self.buffer), (batch_size,), device=self.device).tolist()
@@ -88,7 +88,7 @@ class ATDQNAgent:
         beta_start=0.4,
         beta_end=1.0,
         T=20000000,
-        device="cuda",
+        device="mps",
     ):
         self.action_size = action_size
         self.device = device
@@ -100,8 +100,7 @@ class ATDQNAgent:
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=0.00025)
         self.replay_buffer = ReplayBuffer()
         self.gamma = 0.99
-
-        self.alpha = defaultdict(lambda: 0.25)
+        self.alpha = defaultdict(lambda: torch.tensor(0.25, device=self.device, dtype=torch.float32))
         self.attention_history = defaultdict(
             lambda: deque(maxlen=1000)
         )  # Track last 1000 attention values
@@ -139,7 +138,7 @@ class ATDQNAgent:
 
         # Copy back to CPU dictionary
         for i, key in enumerate(self.alpha.keys()):
-            self.alpha[key] = normalized_values[i].item()  # Move individual value back to CPU
+            self.alpha[key] = normalized_values[i]  # Keep as GPU tensors
 
     # update the attention of a state (importance sampled normalized weight)
     def update_attention(self, state_hashes, IS_td_errors):
@@ -148,9 +147,8 @@ class ATDQNAgent:
             self.attention_history[state_hash].append(error.item())
 
         for state_hash in state_hashes:
-            self.alpha[state_hash] = sum(self.attention_history[state_hash]) / len(
-                self.attention_history[state_hash]
-            )
+            attention_value = sum(self.attention_history[state_hash]) / len(self.attention_history[state_hash])
+            self.alpha[state_hash] = torch.tensor(attention_value, dtype=torch.float32, device=self.device)
 
         self.normalize_attention()
 
@@ -160,7 +158,7 @@ class ATDQNAgent:
         return (1 / priority) ** self.beta  # Vectorized operation
 
     def act(self, state):
-        if self.get_attention(state) < self.tau:
+        if self.get_attention(state).item() < self.tau:
             self.exploration_count += 1  # Exploration
             return np.random.choice(self.action_size)
         self.exploitation_count += 1  # Exploitation
@@ -222,7 +220,7 @@ state, _ = env.reset()
 state_shape = (4, 84, 84)
 action_size = env.action_space.n
 agent = ATDQNAgent(
-    action_size, state_shape, device="cuda"
+    action_size, state_shape, device="mps"
 )
 
 total_steps = 20000000  # Training for 20 million steps
@@ -279,18 +277,24 @@ for step in tqdm(range(total_steps), desc="Training Progress"):
 
         # Log every 10 episodes
         if episode % 10 == 0:
-            attention_values = list(
-                agent.alpha.values()
-            )  # Extract all attention weights
-            if attention_values:  # Ensure there are values to log
+            if agent.alpha:  # Ensure there are values to log
+                attention_values = torch.stack(list(agent.alpha.values()))  # Keep on GPU
+
+                # Compute statistics efficiently on GPU
+                mean_val = attention_values.mean().item()
+                std_val = attention_values.std().item()
+                min_val = attention_values.min().item()
+                max_val = attention_values.max().item()
+
+                # Log to wandb
                 wandb.log(
-                    {
-                        "Attention Mean every 10 episodes": np.mean(attention_values),
-                        "Attention Std every 10 episodes": np.std(attention_values),
-                        "Attention Min every 10 episodes": np.min(attention_values),
-                        "Attention Max every 10 episodes": np.max(attention_values),
-                    },
-                    step=episode,
+                {
+                    "Attention Mean every 10 episodes": mean_val,
+                    "Attention Std every 10 episodes": std_val,
+                    "Attention Min every 10 episodes": min_val,
+                    "Attention Max every 10 episodes": max_val,
+                },
+                step=episode,
                 )
 
         # Log every 100 episodes
