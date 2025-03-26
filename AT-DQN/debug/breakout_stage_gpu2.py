@@ -127,7 +127,7 @@ class ATDQNAgent:
         if not self.alpha:
             return
 
-        values = torch.tensor(list(self.alpha.values()), dtype=torch.float32, device=self.device)
+        values = torch.stack(list(self.alpha.values()))
         min_val, max_val = values.min(), values.max()
 
         if min_val == max_val:
@@ -136,9 +136,8 @@ class ATDQNAgent:
          # Normalize values on GPU
         normalized_values = (values - min_val) / (max_val - min_val)
 
-        # Copy back to CPU dictionary
-        for i, key in enumerate(self.alpha.keys()):
-            self.alpha[key] = normalized_values[i]  # Keep as GPU tensors
+        for i, (key, _) in enumerate(self.alpha.items()):
+            self.alpha[key] = normalized_values[i]
 
     # update the attention of a state (importance sampled normalized weight)
     def update_attention(self, state_hashes, IS_td_errors):
