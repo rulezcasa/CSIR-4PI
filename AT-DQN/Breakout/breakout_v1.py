@@ -284,7 +284,7 @@ env.close()
 
 
 # Define the path to save the model
-model_path = "AT_DQN_Models/atdqn_breakoutv1_model.pth"
+model_path = "atdqn_breakoutv1_model.pth"
 
 # Save the model
 torch.save(agent.target_network.state_dict(), model_path)
