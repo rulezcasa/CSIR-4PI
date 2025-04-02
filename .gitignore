@@ -1,0 +1,4 @@
+**/wandb/
+**/wandb-debug.log
+**/wandb-metadata.json
+**/wandb-summary.json
