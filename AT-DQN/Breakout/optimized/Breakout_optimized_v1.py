@@ -5,13 +5,17 @@ import torch.nn as nn
 import torch.optim as optim
 import random
 from collections import deque, defaultdict
-import wandb
-from tqdm import tqdm
 import psutil
 import hashlib
-from wandb import AlertLevel
 import xxhash
 import torch.profiler
+from tqdm import tqdm
+from datetime import timedelta
+DEBUG = 0
+
+if DEBUG:
+    import wandb
+    from wandb import AlertLevel
 
 
 # function to log metrics/system usage
@@ -23,12 +27,15 @@ def alert_usage():
     ram_usage = psutil.virtual_memory().percent
 
     if ram_usage > 90:
-        wandb.alert(
-            title="High memory usage",
-            text=f"CPU: {cpu_usage:.2f}%",
-            level=AlertLevel.WARN,
-            wait_duration=timedelta(minutes=10),
-        )
+        if DEBUG:
+            wandb.alert(
+                title="High memory usage",
+                text=f"CPU: {cpu_usage:.2f}%",
+                level=AlertLevel.WARN,
+                wait_duration=timedelta(minutes=10),
+            )
+        else:
+            print(f"ALERT: High memory usage - CPU: {cpu_usage:.2f}%")
 
 
 # Preprocessing function
@@ -203,17 +210,22 @@ class ATDQNAgent:
             self.beta = min(self.beta + self.delta_beta, self.beta_end)
 
 
-wandb.init(
-    project="AT-DQN",
-    name="Breakout_v1",
-    config={
-        "total_steps": 20000000,
-        "beta_start": 0.4,
-        "beta_end": 1.0,
-        "lr": 0.00025,
-        "tau": 0.45,
-    },
-)
+if DEBUG:
+    wandb.init(
+        project="AT-DQN",
+        name="Breakout_v1",
+        config={
+            "total_steps": 20000000,
+            "beta_start": 0.4,
+            "beta_end": 1.0,
+            "lr": 0.00025,
+            "tau": 0.45,
+        },
+    )
+else:
+    print("Running in non-debug mode, wandb logging disabled")
+    print("Config: total_steps=20000000, beta_start=0.4, beta_end=1.0, lr=0.00025, tau=0.45")
+
 env = gym.make("ALE/Breakout-v5")
 state, _ = env.reset()
 state_shape = (4, 84, 84)
@@ -261,18 +273,23 @@ for step in tqdm(range(total_steps), desc="Training Progress"):
         mean_td_error = np.mean(td_errors_per_episode) if td_errors_per_episode else 0.0
         mean_q_value = np.mean(q_values) if q_values else 0.0
 
-        wandb.log(
-            {
-                "global stepcount after every episode": step + 1,
-                "Reward per episode": total_reward,
-                "Mean loss per episode": mean_losses,
-                "Beta per episode": agent.beta,
-                "Episode length": episode_length,
-                "Mean TD Error per episode": mean_td_error,
-                "Mean Q value per episode": mean_q_value,
-            },
-            step=episode,
-        )
+        if DEBUG:
+            wandb.log(
+                {
+                    "global stepcount after every episode": step + 1,
+                    "Reward per episode": total_reward,
+                    "Mean loss per episode": mean_losses,
+                    "Beta per episode": agent.beta,
+                    "Episode length": episode_length,
+                    "Mean TD Error per episode": mean_td_error,
+                    "Mean Q value per episode": mean_q_value,
+                },
+                step=episode,
+            )
+        else:
+            print(f"Episode {episode} - Steps: {step+1}, Reward: {total_reward:.2f}, Loss: {mean_losses:.4f}, "
+                  f"Beta: {agent.beta:.4f}, Length: {episode_length}, TD Error: {mean_td_error:.4f}, "
+                  f"Q Value: {mean_q_value:.4f}")
 
         # Log every 10 episodes
         if episode % 10 == 0:
@@ -285,28 +302,38 @@ for step in tqdm(range(total_steps), desc="Training Progress"):
                 min_val = attention_values.min().item()
                 max_val = attention_values.max().item()
 
-                # Log to wandb
-                wandb.log(
-                {
-                    "Attention Mean every 10 episodes": mean_val,
-                    "Attention Std every 10 episodes": std_val,
-                    "Attention Min every 10 episodes": min_val,
-                    "Attention Max every 10 episodes": max_val,
-                },
-                step=episode,
-                )
+                if DEBUG:
+                    wandb.log(
+                    {
+                        "Attention Mean every 10 episodes": mean_val,
+                        "Attention Std every 10 episodes": std_val,
+                        "Attention Min every 10 episodes": min_val,
+                        "Attention Max every 10 episodes": max_val,
+                    },
+                    step=episode,
+                    )
+                else:
+                    if episode % 50 == 0:  # Reduce print frequency in non-debug mode
+                        print(f"Episode {episode} - Attention stats: Mean={mean_val:.4f}, Std={std_val:.4f}, "
+                              f"Min={min_val:.4f}, Max={max_val:.4f}")
 
         # Log every 100 episodes
         if episode % 100 == 0:
-            # print(f"Episode {episode}: Mean α = {np.mean(list(agent.alpha.values()))}, τ = {agent.tau}")
+            # Added print statement that was commented out in original code
+            print(f"Episode {episode}: Mean α = {torch.mean(torch.stack(list(agent.alpha.values()))).item():.4f}, τ = {agent.tau:.4f}")
             alert_usage()
-            wandb.log(
-                {
-                    "Total Explored States every 100 episodes": agent.exploration_count,
-                    "Total Exploited States every 100 episodes": agent.exploitation_count,
-                },
-                step=episode,
-            )
+            
+            if DEBUG:
+                wandb.log(
+                    {
+                        "Total Explored States every 100 episodes": agent.exploration_count,
+                        "Total Exploited States every 100 episodes": agent.exploitation_count,
+                    },
+                    step=episode,
+                )
+            else:
+                print(f"Episode {episode} - Explored: {agent.exploration_count}, Exploited: {agent.exploitation_count}")
+                
             agent.exploration_count = 0
             agent.exploitation_count = 0
 
@@ -333,7 +360,8 @@ model_path = "AT_DQN_Models/atdqn_breakoutv1_model.pth"
 torch.save(agent.target_network.state_dict(), model_path)
 print(f"✅ Model saved successfully at {model_path}")
 
-# Also log the model to Weights & Biases (wandb)
-wandb.save(model_path)
-
-wandb.finish()
+if DEBUG:
+    wandb.save(model_path)
+    wandb.finish()
+else:
+    print("Debug mode disabled, skipping wandb model upload")
