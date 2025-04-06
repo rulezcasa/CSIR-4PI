@@ -1,5 +1,6 @@
 import numpy as np
 import gym
+import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -11,7 +12,12 @@ import xxhash
 import torch.profiler
 from tqdm import tqdm
 from datetime import timedelta
+# import matplotlib.pyplot as plt
+import cv2
 DEBUG = 0
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+torch.backends.cudnn.benchmark = True
 
 if DEBUG:
     import wandb
@@ -39,12 +45,94 @@ def alert_usage():
 
 
 # Preprocessing function
+# def preprocess_frame(frame):
+#     # frame = torch.tensor(frame, dtype=torch.float32).mean(dim=-1)
+#     frame = torch.from_numpy(frame).to(dtype=torch.float32).mean(dim=-1)
+#     # TODO: Frame aspect ratio change => better resize & crop
+#     frame = torch.nn.functional.interpolate(
+#         frame.unsqueeze(0).unsqueeze(0), size=(84, 84)
+#     ).squeeze()
+#     return frame
+
+# def preprocess_frame(frame):
+#     frame = torch.from_numpy(frame).to(dtype=torch.float32).mean(dim=-1)
+#     frame = frame[35:190]
+#     frame = torch.nn.functional.interpolate(
+#         frame.unsqueeze(0).unsqueeze(0), 
+#         size=(84, 84),
+#         mode='bilinear',
+#         align_corners=False
+#     ).squeeze()
+#     frame = frame / 255.0
+#     return frame
+
 def preprocess_frame(frame):
-    frame = torch.tensor(frame, dtype=torch.float32).mean(dim=-1)
-    frame = torch.nn.functional.interpolate(
-        frame.unsqueeze(0).unsqueeze(0), size=(84, 84)
-    ).squeeze()
-    return frame
+    gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+    cropped = gray[34:193, :]
+    resized = cv2.resize(cropped, (84, 84), interpolation=cv2.INTER_LINEAR)
+    normalized = resized.astype(np.float32) / 255.0
+    return normalized
+
+# def preprocess_frame(frame):
+
+#     debug = True
+#     # Convert to PyTorch tensor
+#     frame_tensor = torch.from_numpy(frame).to(dtype=torch.float32)
+    
+#     # Save original for debugging
+#     original_frame = frame_tensor.clone()
+    
+#     # Convert to grayscale (weighted average better preserves luminance)
+#     gray = frame_tensor[:, :, 0] * 0.299 + frame_tensor[:, :, 1] * 0.587 + frame_tensor[:, :, 2] * 0.114
+    
+#     # Crop for Pong (removing score area at top and some bottom area)
+#     # For Pong, we typically crop to keep only the play area
+#     h, w = gray.shape
+#     cropped = gray[34:193, :]  # Crop values optimized for Pong
+    
+#     # Rescale to 84x84
+#     resized = torch.nn.functional.interpolate(
+#         cropped.unsqueeze(0).unsqueeze(0), size=(84, 84), mode='area'
+#     ).squeeze()
+    
+#     # Normalize
+#     normalized = resized / 255.0
+    
+#     # Debug visualization
+#     if debug:
+#         plt.figure(figsize=(15, 10))
+        
+#         plt.subplot(2, 2, 1)
+#         plt.title("Original Frame")
+#         plt.imshow(original_frame.numpy().astype(int))
+        
+#         plt.subplot(2, 2, 2)
+#         plt.title("Grayscale")
+#         plt.imshow(gray.numpy(), cmap='gray')
+        
+#         plt.subplot(2, 2, 3)
+#         plt.title("Cropped")
+#         plt.imshow(cropped.numpy(), cmap='gray')
+        
+#         # Draw crop lines on original image
+#         plt.subplot(2, 2, 4)
+#         plt.title("Crop Visualization")
+#         img_with_lines = original_frame.numpy().copy()
+#         # Draw horizontal crop linesConvert to grayscale (weighted average better preserves luminance)
+#         img_with_lines[34, :, 0] = 255  # Top crop line (red)
+#         img_with_lines[34, :, 1:] = 0
+#         img_with_lines[193, :, 0] = 255  # Bottom crop line (red)
+#         img_with_lines[193, :, 1:] = 0
+#         # plt.tight_layout()
+#         plt.imsave("./figs/lines.png", img_with_lines.astype(np.uint8))
+        
+#         # Show final preprocessed frame
+#         plt.figure(figsize=(5, 5))
+#         plt.title("Final Preprocessed 84x84")
+#         plt.imsave("./figs/final.png", normalized, cmap='gray')
+    
+#     return normalized
+
 
 
 # Define the Q-network using PyTorch
@@ -146,6 +234,52 @@ class ATDQNAgent:
         for i, (key, _) in enumerate(self.alpha.items()):
             self.alpha[key] = normalized_values[i]
 
+    # def normalize_attention(self):
+    #     # Assuming self.alpha_tensor is a pre-allocated tensor on the GPU
+    #     # and self.indices is the mapping to keys if needed.
+    #     if self.alpha_tensor.numel() == 0:
+    #         return
+
+    #     min_val = self.alpha_tensor.min()
+    #     max_val = self.alpha_tensor.max()
+
+    #     # If all values are the same, skip normalization
+    #     if min_val == max_val:
+    #         return
+
+    #     # In-place normalization (all operations are on GPU)
+    #     self.alpha_tensor.sub_(min_val).div_(max_val - min_val)
+
+    #     # If you need to update the dictionary form for further processing:
+    #     # for idx, key in enumerate(self.indices):
+    #     #     self.alpha[key] = self.alpha_tensor[idx]
+
+
+
+    # def normalize_attention(self):
+    #     if not self.alpha:
+    #         return
+        
+    #     # Process in small batches to find min/max
+    #     keys = list(self.alpha.keys())
+    #     current_min = self.alpha[keys[0]]
+    #     current_max = self.alpha[keys[0]]
+        
+    #     # Find min/max using efficient tensor operations
+    #     for key in keys[1:]:
+    #         current_min = torch.min(current_min, self.alpha[key])
+    #         current_max = torch.max(current_max, self.alpha[key])
+        
+    #     if current_min == current_max:
+    #         return  # Skip normalization if all values are the same
+        
+    #     # Calculate normalization parameters once
+    #     range_val = current_max - current_min
+        
+    #     # Apply normalization using in-place operations for better performance
+    #     for key in self.alpha:
+    #         self.alpha[key] = (self.alpha[key] - current_min) / range_val
+
     # update the attention of a state (importance sampled normalized weight)
     def update_attention(self, state_hashes, IS_td_errors):
         for state_hash, error in zip(state_hashes, IS_td_errors):
@@ -226,7 +360,9 @@ else:
     print("Running in non-debug mode, wandb logging disabled")
     print("Config: total_steps=20000000, beta_start=0.4, beta_end=1.0, lr=0.00025, tau=0.45")
 
-env = gym.make("ALE/Breakout-v5")
+# env = gym.make("ALE/Breakout-v5")
+# os.makedirs(os.path.dirname("./figs/") or '.', exist_ok=True)
+env = gym.make("ALE/Pong-v5")
 state, _ = env.reset()
 state_shape = (4, 84, 84)
 action_size = env.action_space.n
@@ -234,7 +370,8 @@ agent = ATDQNAgent(
     action_size, state_shape, device="cuda"
 )
 
-total_steps = 20000000  # Training for 20 million steps
+# total_steps = 20000000  # Training for 20 million steps
+total_steps = 55000
 total_cumulative_reward = 0
 state = preprocess_frame(state)
 state_stack = np.stack([state] * 4, axis=0)
@@ -352,6 +489,7 @@ for step in tqdm(range(total_steps), desc="Training Progress"):
 print("Training complete!")
 env.close()
 
+os.makedirs("AT_DQN_Models", exist_ok=True)
 
 # Define the path to save the model
 model_path = "AT_DQN_Models/atdqn_breakoutv1_model.pth"
