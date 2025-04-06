@@ -18,6 +18,7 @@ DEBUG = 0
 
 # TODO: Soft update with small tau - Further tuning.
 # TODO: Take care of frame squeezing in pong and other games. Optimize specifically.
+# TODO: Huber loss instead of MSE
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.backends.cudnn.benchmark = True
@@ -71,24 +72,48 @@ class QNetwork(nn.Module):
         x = self.relu(self.fc1(x))
         return self.fc2(x)
 
-
-# Replay Buffer for Experience Replay (modified to use gpu)
 class ReplayBuffer:
-    def __init__(self, capacity=1000000, device="cuda"):
-        self.buffer = deque(maxlen=capacity)
-        self.device=device
+    def __init__(self, capacity=1000000, device=device):
+        self.capacity = capacity
+        self.device = device
+        self.device_cpu = 'cpu'
+        self.position = 0
+        self.size = 0
+        
+        self.states = torch.zeros((capacity, 4, 84, 84), dtype=torch.float32, device=self.device_cpu)
+        self.actions = torch.zeros((capacity, 1), dtype=torch.long, device=self.device_cpu)
+        self.rewards = torch.zeros((capacity, 1), dtype=torch.float32, device=self.device_cpu)
+        self.next_states = torch.zeros((capacity, 4, 84, 84), dtype=torch.float32, device=self.device_cpu)
+        self.dones = torch.zeros((capacity, 1), dtype=torch.float32, device=self.device_cpu)
+        
+        # optimization - pinned memory for faster transfers
+        self.states = self.states.pin_memory()
+        self.actions = self.actions.pin_memory()
+        self.rewards = self.rewards.pin_memory()
+        self.next_states = self.next_states.pin_memory() 
+        self.dones = self.dones.pin_memory()
 
-    def add(self, experience):
-        self.buffer.append(tuple(np.array(x, dtype=np.float32) for x in experience))
+    def add(self, state, action, reward, next_state, done):
+        self.states[self.position] = torch.tensor(state, dtype=torch.float32)
+        self.actions[self.position] = action
+        self.rewards[self.position] = reward
+        self.next_states[self.position] = torch.tensor(next_state, dtype=torch.float32)
+        self.dones[self.position] = done
+        
+        self.position = (self.position + 1) % self.capacity
+        self.size = min(self.size + 1, self.capacity)
 
     def sample(self, batch_size):
-        indices = np.random.choice(len(self.buffer), batch_size, replace=False)  # Sample on CPU
-        batch = [self.buffer[i] for i in indices]
-
-        return tuple(torch.tensor(np.array(x), dtype=torch.float32, device=self.device) for x in zip(*batch))
-
-    def size(self):
-        return len(self.buffer)
+        indices = np.random.choice(self.size, batch_size, replace=False)
+        
+        # single operation
+        return (
+            self.states[indices].to(self.device),
+            self.actions[indices].to(self.device),
+            self.rewards[indices].to(self.device),
+            self.next_states[indices].to(self.device),
+            self.dones[indices].to(self.device)
+        )
 
 
 class ATDQNAgent:
@@ -113,7 +138,7 @@ class ATDQNAgent:
             param.requires_grad = False
 
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=0.00025)
-        self.replay_buffer = ReplayBuffer()
+        self.replay_buffer = ReplayBuffer(capacity=1000000, device=device)
         self.gamma = 0.99
         self.alpha = defaultdict(lambda: torch.tensor(0.25, device=self.device, dtype=torch.float32))
         self.attention_history = defaultdict(
@@ -181,40 +206,47 @@ class ATDQNAgent:
             return torch.argmax(self.q_network(state_tensor)).item()
 
     def train_step(self):
-        if self.replay_buffer.size() < 50000:
+        if self.replay_buffer.size < 50000:
             return None
 
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(32)
 
-        target_q_values = self.target_network(next_states).detach()
-        max_next_q = target_q_values.max(dim=1)[0]
-        targets = rewards + (1 - dones) * self.gamma * max_next_q
+        # optimization - gpu
+        with torch.no_grad():
+            target_q_values = self.target_network(next_states)
+            max_next_q = target_q_values.max(dim=1, keepdim=True)[0]
+            targets = rewards + (1 - dones) * self.gamma * max_next_q
 
-        q_values = self.q_network(states).gather(1, actions.long().unsqueeze(1)).squeeze()
+        q_values = self.q_network(states).gather(1, actions.long())
     
         td_errors = targets - q_values
 
         # Update attention based on TD errors and importance sampling
-        importance_weights = self.compute_importance_weight(td_errors)
+        importance_weights = self.compute_importance_weight(td_errors.detach())
 
         state_hashes = [self.get_state_hash(state.cpu().numpy()) for state in states]
-        self.update_attention(state_hashes, importance_weights)
+        self.update_attention(state_hashes, importance_weights.squeeze())
 
         # MSE loss
         loss = torch.mean(td_errors**2)
 
         self.optimizer.zero_grad()
         loss.backward()
+        # add grad clip
+        torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=10.0)
         self.optimizer.step()
 
         self.step_count += 1
         if self.step_count % 10000 == 0:
             self.target_network.load_state_dict(self.q_network.state_dict())
 
-        return loss.item(), td_errors.abs().cpu().tolist(), q_values.cpu().tolist()
+        return loss.item(), td_errors.abs().squeeze().cpu().tolist(), q_values.squeeze().cpu().tolist()
+
+    def add_experience(self, state, action, reward, next_state, done):
+        self.replay_buffer.add(state, action, reward, next_state, done)
 
     def anneal_beta(self):
-        if self.replay_buffer.size() >= 50000:
+        if self.replay_buffer.size >= 50000:
             self.beta = min(self.beta + self.delta_beta, self.beta_end)
 
 
@@ -240,8 +272,7 @@ def train_agent(env_name, total_steps=20000000, render=False):
         next_frame, reward, done, _, _ = env.step(action)
         next_frame = preprocess_frame(next_frame)
         next_state_stack = np.concatenate((state_stack[1:], np.expand_dims(next_frame, axis=0)), axis=0)
-        # agent.add_experience(state_stack, action, reward, next_state_stack, done)
-        agent.replay_buffer.add((state_stack, action, reward, next_state_stack, done))
+        agent.add_experience(state_stack, action, reward, next_state_stack, done)
         result = agent.train_step()
         state_stack = next_state_stack
         total_reward += reward
