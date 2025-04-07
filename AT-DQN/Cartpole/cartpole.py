@@ -64,9 +64,9 @@ def alert_usage():
 class QNetwork(nn.Module):
     def __init__(self, state_shape, action_size):
         super(QNetwork, self).__init__()
-        self.fc1 = nn.Linear(4, 128)  # cartpole input : (4,)
-        self.fc2 = nn.Linear(128, 128)
-        self.fc3 = nn.Linear(128, action_size)
+        self.fc1 = nn.Linear(4, 32)  # cartpole input : (4,)
+        self.fc2 = nn.Linear(32, 32)
+        self.fc3 = nn.Linear(32, action_size)
         self.relu = nn.ReLU()
 
     def forward(self, x):
@@ -101,12 +101,12 @@ class ReplayBuffer:
             (capacity, 1), dtype=torch.float32, device=self.device_cpu
         )
 
-        # optimization - pinned memory for faster transfers
-        # self.states = self.states.pin_memory()
-        # self.actions = self.actions.pin_memory()
-        # self.rewards = self.rewards.pin_memory()
-        # self.next_states = self.next_states.pin_memory()
-        # self.dones = self.dones.pin_memory()
+        optimization - pinned memory for faster transfers
+        self.states = self.states.pin_memory()
+        self.actions = self.actions.pin_memory()
+        self.rewards = self.rewards.pin_memory()
+        self.next_states = self.next_states.pin_memory()
+        self.dones = self.dones.pin_memory()
 
     def add(
         self, state, action, reward, next_state, done
