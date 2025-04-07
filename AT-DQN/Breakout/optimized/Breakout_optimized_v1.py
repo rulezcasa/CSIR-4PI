@@ -17,7 +17,7 @@ import cv2
 DEBUG = 0
 
 # TODO: Soft update with small tau - Further tuning.
-# TODO: Take care of frame squeezing in pong and other games. Optimize specifically.
+# TODO: Take care of frame resizing/squeezing in pong and other games. Optimize specifically.
 # TODO: Huber loss instead of MSE
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -115,6 +115,122 @@ class ReplayBuffer:
             self.dones[indices].to(self.device)
         )
 
+# optimization - 200hrs
+class StateAttentionTrackerLRU:
+    def __init__(self, capacity=100000, device='cuda', beta=0.4, history_length=1000):
+        self.device = device
+        self.capacity = capacity
+        self.beta = beta
+        self.history_length = history_length
+        self.attention_values = torch.ones(capacity, dtype=torch.float32, device=device) * 0.25
+        self.attention_history = torch.zeros((capacity, history_length), dtype=torch.float32, device=device)
+        self.history_counts = torch.zeros(capacity, dtype=torch.long, device=device)
+        
+        self.current_index = 0
+        self.hash_to_index = {}
+        self.last_access = torch.zeros(capacity, dtype=torch.long, device=device)
+        self.access_counter = 0
+
+    def get_state_hash(self, state):
+        # validate if needed
+        if isinstance(state, torch.Tensor):
+            # Convert to numpy if needed for hashing
+            if state.device != torch.device('cpu'):
+                state_bytes = state.cpu().numpy().tobytes()
+            else:
+                state_bytes = state.numpy().tobytes()
+        else:
+            state_bytes = np.asarray(state).tobytes()
+            
+        return xxhash.xxh3_64(state_bytes).hexdigest()
+    
+    def get_state_index(self, state):
+        state_hash = self.get_state_hash(state)
+        self.access_counter += 1
+        
+        if state_hash in self.hash_to_index:
+            idx = self.hash_to_index[state_hash]
+            self.last_access[idx] = self.access_counter
+            return idx
+        
+        if self.current_index < self.capacity:
+            idx = self.current_index
+            self.current_index += 1
+        else:
+            used_indices = torch.arange(self.current_index, device=self.device)
+            idx = used_indices[torch.argmin(self.last_access[:self.current_index])].item()
+            old_hash = None
+            for h, i in list(self.hash_to_index.items()):
+                if i == idx:
+                    old_hash = h
+                    break
+            if old_hash:
+                del self.hash_to_index[old_hash]
+            self.history_counts[idx] = 0
+            self.attention_history[idx].zero_()
+        
+        self.hash_to_index[state_hash] = idx
+        self.last_access[idx] = self.access_counter
+        
+        return idx
+    
+    def batch_get_indices(self, states):
+        return torch.tensor([self.get_state_index(state) for state in states], 
+                           device=self.device, dtype=torch.long)
+    
+    def get_attention(self, state):
+        idx = self.get_state_index(state)
+        return self.attention_values[idx]
+    
+    def batch_get_attention(self, states):
+        indices = self.batch_get_indices(states)
+        return self.attention_values[indices]
+    
+    def update_attention(self, states, importance_weights):
+        # Convert to tensor if needed - validate
+        if not isinstance(importance_weights, torch.Tensor):
+            importance_weights = torch.tensor(
+                importance_weights, dtype=torch.float32, device=self.device
+            )
+        indices = self.batch_get_indices(states)
+        
+        # optimization - vectorization
+        for i, idx in enumerate(indices):
+            pos = self.history_counts[idx] % self.history_length
+            self.attention_history[idx, pos] = importance_weights[i]
+            self.history_counts[idx] += 1
+        
+        unique_indices = torch.unique(indices)
+        for idx in unique_indices:
+            count = min(self.history_counts[idx].item(), self.history_length)
+            if count > 0:
+                valid_history = self.attention_history[idx, :count]
+                self.attention_values[idx] = valid_history.mean()
+        
+        self.normalize_attention()
+    
+    def normalize_attention(self):
+        if self.current_index == 0:
+            return
+        used_values = self.attention_values[:self.current_index]
+        min_val = used_values.min()
+        max_val = used_values.max()
+        
+        if min_val == max_val:
+            return 
+        used_values.sub_(min_val).div_(max_val - min_val)
+    
+    def compute_importance_weight(self, td_errors):
+        priority = td_errors.abs() + 1e-6
+        return (1 / priority) ** self.beta
+
+    def to(self, device):
+        self.device = device
+        self.attention_values = self.attention_values.to(device)
+        self.attention_history = self.attention_history.to(device)
+        self.history_counts = self.history_counts.to(device)
+        self.last_access = self.last_access.to(device)
+        return self
 
 class ATDQNAgent:
     def __init__(
@@ -139,6 +255,7 @@ class ATDQNAgent:
 
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=0.00025)
         self.replay_buffer = ReplayBuffer(capacity=1000000, device=device)
+        self.attention_tracker = StateAttentionTrackerLRU(capacity=100000, device=device)
         self.gamma = 0.99
         self.alpha = defaultdict(lambda: torch.tensor(0.25, device=self.device, dtype=torch.float32))
         self.attention_history = defaultdict(
@@ -153,51 +270,10 @@ class ATDQNAgent:
         self.step_count = 0
         self.exploration_count = 0
         self.exploitation_count = 0
-
-    # sha-256 hashing for efficient memory utilisation
-    def get_state_hash(self, state):
-        return xxhash.xxh3_128(state.tobytes()).hexdigest()
-
-    # used to get attentin weight a state using hash key
-    def get_attention(self, state):
-        return self.alpha[self.get_state_hash(state)]
-
-    # Min-max normalizing: [0,1]
-    def normalize_attention(self):
-        if not self.alpha:
-            return
-
-        values = torch.stack(list(self.alpha.values()))
-        min_val, max_val = values.min(), values.max()
-
-        if min_val == max_val:
-            return  # Skip normalization if all values are the same
-
-         # Normalize values on GPU
-        normalized_values = (values - min_val) / (max_val - min_val)
-
-        for i, (key, _) in enumerate(self.alpha.items()):
-            self.alpha[key] = normalized_values[i]
-
-    # update the attention of a state (importance sampled normalized weight)
-    def update_attention(self, state_hashes, IS_td_errors):
-        for state_hash, error in zip(state_hashes, IS_td_errors):
-            self.attention_history[state_hash].append(error.item())
-
-        for state_hash in state_hashes:
-            history_array = np.array(self.attention_history[state_hash], dtype=np.float32)
-            attention_value = np.mean(history_array)  # Efficient SMA calculation
-            self.alpha[state_hash] = torch.tensor(attention_value, dtype=torch.float32, device=self.device)
-
-        self.normalize_attention()
-
-    # Importance weight computation
-    def compute_importance_weight(self, td_errors):
-        priority = td_errors.abs() + 1e-6  # Ensure nonzero denominator
-        return (1 / priority) ** self.beta  # Vectorized operation
+        self.check_replay_size = 50000
 
     def act(self, state):
-        if self.get_attention(state).item() < self.tau:
+        if self.attention_tracker.get_attention(state).item() < self.tau:
             self.exploration_count += 1  # Exploration
             return np.random.choice(self.action_size)
         self.exploitation_count += 1  # Exploitation
@@ -206,7 +282,7 @@ class ATDQNAgent:
             return torch.argmax(self.q_network(state_tensor)).item()
 
     def train_step(self):
-        if self.replay_buffer.size < 50000:
+        if self.replay_buffer.size < self.check_replay_size:
             return None
 
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(32)
@@ -222,10 +298,8 @@ class ATDQNAgent:
         td_errors = targets - q_values
 
         # Update attention based on TD errors and importance sampling
-        importance_weights = self.compute_importance_weight(td_errors.detach())
-
-        state_hashes = [self.get_state_hash(state.cpu().numpy()) for state in states]
-        self.update_attention(state_hashes, importance_weights.squeeze())
+        importance_weights = self.attention_tracker.compute_importance_weight(td_errors.detach())
+        self.attention_tracker.update_attention(states, importance_weights.squeeze())
 
         # MSE loss
         loss = torch.mean(td_errors**2)
@@ -246,7 +320,7 @@ class ATDQNAgent:
         self.replay_buffer.add(state, action, reward, next_state, done)
 
     def anneal_beta(self):
-        if self.replay_buffer.size >= 50000:
+        if self.replay_buffer.size >= self.check_replay_size:
             self.beta = min(self.beta + self.delta_beta, self.beta_end)
 
 
@@ -307,8 +381,8 @@ def train_agent(env_name, total_steps=20000000, render=False):
                       f"Q Value: {mean_q_value:.4f}")
             
             if episode % 10 == 0:
-                if agent.alpha:  # Ensure there are values to log
-                    attention_values = torch.stack(list(agent.alpha.values()))  # Keep on GPU
+                if agent.attention_tracker.current_index > 0:
+                    attention_values = agent.attention_tracker.attention_values[:agent.attention_tracker.current_index]
 
                     # Compute statistics efficiently on GPU
                     mean_val = attention_values.mean().item()
