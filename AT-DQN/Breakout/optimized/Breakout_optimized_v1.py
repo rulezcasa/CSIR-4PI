@@ -19,6 +19,9 @@ DEBUG = 0
 # TODO: Soft update with small tau - Further tuning.
 # TODO: Take care of frame resizing/squeezing in pong and other games. Optimize specifically.
 # TODO: Huber loss instead of MSE
+# DIDNT HELP: Mixed Precision Training
+# DIDNT HELP: Replacing hash with finger printing
+# DIDNT HELP: Partial JIT compilation of frame processing, batching
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.backends.cudnn.benchmark = True
@@ -132,16 +135,13 @@ class StateAttentionTrackerLRU:
         self.access_counter = 0
 
     def get_state_hash(self, state):
-        # validate if needed
         if isinstance(state, torch.Tensor):
-            # Convert to numpy if needed for hashing
             if state.device != torch.device('cpu'):
                 state_bytes = state.cpu().numpy().tobytes()
             else:
                 state_bytes = state.numpy().tobytes()
         else:
             state_bytes = np.asarray(state).tobytes()
-            
         return xxhash.xxh3_64(state_bytes).hexdigest()
     
     def get_state_index(self, state):
