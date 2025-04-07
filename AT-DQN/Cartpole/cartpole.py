@@ -12,9 +12,14 @@ import xxhash
 import torch.profiler
 from tqdm import tqdm
 from datetime import timedelta
-# import matplotlib.pyplot as plt
 import cv2
-DEBUG = 1
+import yaml
+
+DEBUG = True
+if DEBUG:
+    import wandb
+    from wandb import AlertLevel
+
 
 # TODO: Soft update with small tau - Further tuning.
 # TODO: Take care of frame resizing/squeezing in pong and other games. Optimize specifically.
@@ -23,12 +28,17 @@ DEBUG = 1
 # DIDNT HELP: Replacing hash with finger printing
 # DIDNT HELP: Partial JIT compilation of frame processing, batching
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-torch.backends.cudnn.benchmark = True
 
-if DEBUG:
-    import wandb
-    from wandb import AlertLevel
+# Initilizations
+with open("config.yaml", "r") as f:
+    config = yaml.safe_load(f)
+
+if config['device']=='mps':
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+if config['device']=='cuda':
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    torch.backends.cudnn.benchmark = True
+
 
 
 # function to log metrics/system usage
@@ -54,7 +64,7 @@ def alert_usage():
 class QNetwork(nn.Module):
     def __init__(self, state_shape, action_size):
         super(QNetwork, self).__init__()
-        self.fc1 = nn.Linear(4, 128) #cartpole input : (4,)
+        self.fc1 = nn.Linear(4, 128)  # cartpole input : (4,)
         self.fc2 = nn.Linear(128, 128)
         self.fc3 = nn.Linear(128, action_size)
         self.relu = nn.ReLU()
@@ -64,90 +74,121 @@ class QNetwork(nn.Module):
         x = self.relu(self.fc2(x))
         return self.fc3(x)
 
+
 class ReplayBuffer:
-    def __init__(self, capacity=50000, device=device): #adjusting replay buffer to 50K. ()
+    def __init__(
+        self, capacity=config["replay_buffer"], device=device
+    ):  # adjusting replay buffer to 50K. ()
         self.capacity = capacity
         self.device = device
-        self.device_cpu = 'cpu'
-        self.position = 0 #used to track the current index in the buffer.
-        self.size = 0 #used to track the moving size of the buffer.
-        
-        self.states = torch.zeros((capacity, 4), dtype=torch.float32, device=self.device_cpu) #dimension change from 4,84,84 to 4 (cartpole)
-        self.actions = torch.zeros((capacity, 1), dtype=torch.long, device=self.device_cpu)
-        self.rewards = torch.zeros((capacity, 1), dtype=torch.float32, device=self.device_cpu)
-        self.next_states = torch.zeros((capacity, 4), dtype=torch.float32, device=self.device_cpu) #dimension change
-        self.dones = torch.zeros((capacity, 1), dtype=torch.float32, device=self.device_cpu)
-        
-        # optimization - pinned memory for faster transfers
-        self.states = self.states.pin_memory()
-        self.actions = self.actions.pin_memory()
-        self.rewards = self.rewards.pin_memory()
-        self.next_states = self.next_states.pin_memory() 
-        self.dones = self.dones.pin_memory()
+        self.device_cpu = "cpu"
+        self.position = 0  # used to track the current index in the buffer.
+        self.size = 0  # used to track the moving size of the buffer.
 
-    def add(self, state, action, reward, next_state, done): #add experince to the current position of buffer
+        self.states = torch.zeros(
+            (capacity, 4), dtype=torch.float32, device=self.device_cpu
+        )  # dimension change from 4,84,84 to 4 (cartpole)
+        self.actions = torch.zeros(
+            (capacity, 1), dtype=torch.long, device=self.device_cpu
+        )
+        self.rewards = torch.zeros(
+            (capacity, 1), dtype=torch.float32, device=self.device_cpu
+        )
+        self.next_states = torch.zeros(
+            (capacity, 4), dtype=torch.float32, device=self.device_cpu
+        )  # dimension change
+        self.dones = torch.zeros(
+            (capacity, 1), dtype=torch.float32, device=self.device_cpu
+        )
+
+        # optimization - pinned memory for faster transfers
+        # self.states = self.states.pin_memory()
+        # self.actions = self.actions.pin_memory()
+        # self.rewards = self.rewards.pin_memory()
+        # self.next_states = self.next_states.pin_memory()
+        # self.dones = self.dones.pin_memory()
+
+    def add(
+        self, state, action, reward, next_state, done
+    ):  # add experince to the current position of buffer
         self.states[self.position] = torch.tensor(state, dtype=torch.float32)
         self.actions[self.position] = action
         self.rewards[self.position] = reward
         self.next_states[self.position] = torch.tensor(next_state, dtype=torch.float32)
         self.dones[self.position] = done
-        
-        self.position = (self.position + 1) % self.capacity #increment position index (circular buffer)
-        self.size = min(self.size + 1, self.capacity) #increment size
 
-    def sample(self, batch_size): 
-        indices = np.random.choice(self.size, batch_size, replace=False) #sample experiences randomly
-        
+        self.position = (
+            self.position + 1
+        ) % self.capacity  # increment position index (circular buffer)
+        self.size = min(self.size + 1, self.capacity)  # increment size
+
+    def sample(self, batch_size):
+        indices = np.random.choice(
+            self.size, batch_size, replace=False
+        )  # sample experiences randomly
+
         # single operation
         return (
             self.states[indices].to(self.device),
             self.actions[indices].to(self.device),
             self.rewards[indices].to(self.device),
             self.next_states[indices].to(self.device),
-            self.dones[indices].to(self.device)
+            self.dones[indices].to(self.device),
         )
+
 
 # optimization - 200hrs
 class StateAttentionTrackerLRU:
-    def __init__(self, capacity=100000, device='cuda', beta=0.4, history_length=10): #sma window from 1000 to 10
+    def __init__(
+        self, capacity=config["LRU"], device=device, history_length=config["sma_window"]
+    ):  # sma window from 1000 to 10
         self.device = device
         self.capacity = capacity
-        self.beta = beta
         self.history_length = history_length
-        self.attention_values = torch.ones(capacity, dtype=torch.float32, device=device) * 0.25
-        self.attention_history = torch.zeros((capacity, history_length), dtype=torch.float32, device=device) ## CHECK!
-        self.history_counts = torch.zeros(capacity, dtype=torch.long, device=device) ## CHECK!
-        
-        self.current_index = 0 
+        self.attention_values = (
+            torch.ones(capacity, dtype=torch.float32, device=device) * 0.25
+        )
+        self.attention_history = torch.zeros(
+            (capacity, history_length), dtype=torch.float32, device=device
+        )  ## CHECK!
+        self.history_counts = torch.zeros(
+            capacity, dtype=torch.long, device=device
+        )  ## CHECK!
+
+        self.current_index = 0
         self.hash_to_index = {}
         self.last_access = torch.zeros(capacity, dtype=torch.long, device=device)
-        self.access_counter = 0 #Timestep for each state accessed
+        self.access_counter = 0  # Timestep for each state accessed
 
-    def get_state_hash(self, state): #Function to hash state
-        if isinstance(state, torch.Tensor): #if tensor then
-            if state.device != torch.device('cpu'):
+    def get_state_hash(self, state):  # Function to hash state
+        if isinstance(state, torch.Tensor):  # if tensor then
+            if state.device != torch.device("cpu"):
                 state_bytes = state.cpu().numpy().tobytes()
             else:
                 state_bytes = state.numpy().tobytes()
-        else: #if array then
-            state_bytes = np.asarray(state).tobytes() 
+        else:  # if array then
+            state_bytes = np.asarray(state).tobytes()
         return xxhash.xxh3_64(state_bytes).hexdigest()
-    
-    def get_state_index(self, state): #Retrieve index or create new in LRU
+
+    def get_state_index(self, state):  # Retrieve index or create new in LRU
         state_hash = self.get_state_hash(state)
         self.access_counter += 1
-        
-        if state_hash in self.hash_to_index: #state already exists
+
+        if state_hash in self.hash_to_index:  # state already exists
             idx = self.hash_to_index[state_hash]
-            self.last_access[idx] = self.access_counter #update access time of this state
-            return idx #return the index
-        
+            self.last_access[idx] = (
+                self.access_counter
+            )  # update access time of this state
+            return idx  # return the index
+
         if self.current_index < self.capacity:
             idx = self.current_index
             self.current_index += 1
         else:
             used_indices = torch.arange(self.current_index, device=self.device)
-            idx = used_indices[torch.argmin(self.last_access[:self.current_index])].item()
+            idx = used_indices[
+                torch.argmin(self.last_access[: self.current_index])
+            ].item()
             old_hash = None
             for h, i in list(self.hash_to_index.items()):
                 if i == idx:
@@ -157,61 +198,64 @@ class StateAttentionTrackerLRU:
                 del self.hash_to_index[old_hash]
             self.history_counts[idx] = 0
             self.attention_history[idx].zero_()
-        
+
         self.hash_to_index[state_hash] = idx
         self.last_access[idx] = self.access_counter
-        
-        return idx #returns index after removing and adding new
-    
-    def batch_get_indices(self, states): #get index for the batch
-        return torch.tensor([self.get_state_index(state) for state in states], 
-                           device=self.device, dtype=torch.long)
-    
-    def get_attention(self, state): #get attention value for the state index
+
+        return idx  # returns index after removing and adding new
+
+    def batch_get_indices(self, states):  # get index for the batch
+        return torch.tensor(
+            [self.get_state_index(state) for state in states],
+            device=self.device,
+            dtype=torch.long,
+        )
+
+    def get_attention(self, state):  # get attention value for the state index
         idx = self.get_state_index(state)
         return self.attention_values[idx]
-    
-    def batch_get_attention(self, states): #batch processing
+
+    def batch_get_attention(self, states):  # batch processing
         indices = self.batch_get_indices(states)
         return self.attention_values[indices]
-    
-    def update_attention(self, states, importance_weights): 
+
+    def update_attention(self, states, importance_weights):
         # Convert to tensor if needed - validate
         if not isinstance(importance_weights, torch.Tensor):
             importance_weights = torch.tensor(
                 importance_weights, dtype=torch.float32, device=self.device
             )
         indices = self.batch_get_indices(states)
-        
+
         # optimization - vectorization
         for i, idx in enumerate(indices):
             pos = self.history_counts[idx] % self.history_length
             self.attention_history[idx, pos] = importance_weights[i]
             self.history_counts[idx] += 1
-        
+
         unique_indices = torch.unique(indices)
         for idx in unique_indices:
             count = min(self.history_counts[idx].item(), self.history_length)
             if count > 0:
                 valid_history = self.attention_history[idx, :count]
                 self.attention_values[idx] = valid_history.mean()
-        
+
         self.normalize_attention()
-    
+
     def normalize_attention(self):
         if self.current_index == 0:
             return
-        used_values = self.attention_values[:self.current_index]
+        used_values = self.attention_values[: self.current_index]
         min_val = used_values.min()
         max_val = used_values.max()
-        
+
         if min_val == max_val:
-            return 
+            return
         used_values.sub_(min_val).div_(max_val - min_val)
-    
-    def compute_importance_weight(self, td_errors): 
+
+    def compute_importance_weight(self, td_errors, beta):
         priority = td_errors.abs() + 1e-6
-        return (1 / priority) ** self.beta
+        return (1 / priority) ** beta
 
     def to(self, device):
         self.device = device
@@ -221,15 +265,16 @@ class StateAttentionTrackerLRU:
         self.last_access = self.last_access.to(device)
         return self
 
+
 class ATDQNAgent:
     def __init__(
         self,
         action_size,
         state_shape,
-        tau=0.45,
-        beta_start=0.4,
-        beta_end=1.0,
-        T=20000000,
+        tau=config["tau"],
+        beta_start=config["beta_start"],
+        beta_end=config["beta_end"],
+        T=config["T"],
         device=device,
     ):
         self.action_size = action_size
@@ -244,9 +289,13 @@ class ATDQNAgent:
 
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=0.00025)
         self.replay_buffer = ReplayBuffer(capacity=50000, device=device)
-        self.attention_tracker = StateAttentionTrackerLRU(capacity=100000, device=device)
+        self.attention_tracker = StateAttentionTrackerLRU(
+            capacity=100000, device=device
+        )
         self.gamma = 0.99
-        self.alpha = defaultdict(lambda: torch.tensor(0.25, device=self.device, dtype=torch.float32))
+        self.alpha = defaultdict(
+            lambda: torch.tensor(0.25, device=self.device, dtype=torch.float32)
+        )
         self.attention_history = defaultdict(
             lambda: deque(maxlen=1000)
         )  # Track last 1000 attention values
@@ -266,7 +315,9 @@ class ATDQNAgent:
             self.exploration_count += 1  # Exploration
             return np.random.choice(self.action_size)
         self.exploitation_count += 1  # Exploitation
-        state_tensor = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+        state_tensor = torch.tensor(
+            state, dtype=torch.float32, device=self.device
+        ).unsqueeze(0)
         with torch.no_grad():
             return torch.argmax(self.q_network(state_tensor)).item()
 
@@ -283,11 +334,13 @@ class ATDQNAgent:
             targets = rewards + (1 - dones) * self.gamma * max_next_q
 
         q_values = self.q_network(states).gather(1, actions.long())
-    
+
         td_errors = targets - q_values
 
         # Update attention based on TD errors and importance sampling
-        importance_weights = self.attention_tracker.compute_importance_weight(td_errors.detach())
+        importance_weights = self.attention_tracker.compute_importance_weight(
+            td_errors.detach(), self.beta
+        )
         self.attention_tracker.update_attention(states, importance_weights.squeeze())
 
         # MSE loss
@@ -300,10 +353,14 @@ class ATDQNAgent:
         self.optimizer.step()
 
         self.step_count += 1
-        if self.step_count % 1000 == 0:
+        if self.step_count % config["target_update"] == 0:
             self.target_network.load_state_dict(self.q_network.state_dict())
 
-        return loss.item(), td_errors.abs().squeeze().cpu().tolist(), q_values.squeeze().cpu().tolist()
+        return (
+            loss.item(),
+            td_errors.abs().squeeze().cpu().tolist(),
+            q_values.squeeze().cpu().tolist(),
+        )
 
     def add_experience(self, state, action, reward, next_state, done):
         self.replay_buffer.add(state, action, reward, next_state, done)
@@ -344,7 +401,9 @@ def train_agent(env_name, total_steps=100000, render=False):
         if done:
             episode += 1
             mean_losses = np.mean(losses) if losses else 0.0
-            mean_td_error = np.mean(td_errors_per_episode) if td_errors_per_episode else 0.0
+            mean_td_error = (
+                np.mean(td_errors_per_episode) if td_errors_per_episode else 0.0
+            )
             mean_q_value = np.mean(q_values) if q_values else 0.0
 
             if DEBUG:
@@ -361,13 +420,17 @@ def train_agent(env_name, total_steps=100000, render=False):
                     step=episode,
                 )
             else:
-                print(f"Episode {episode} - Steps: {step+1}, Reward: {total_reward:.2f}, Loss: {mean_losses:.4f}, "
-                      f"Beta: {agent.beta:.4f}, Length: {episode_length}, TD Error: {mean_td_error:.4f}, "
-                      f"Q Value: {mean_q_value:.4f}")
-            
+                print(
+                    f"Episode {episode} - Steps: {step+1}, Reward: {total_reward:.2f}, Loss: {mean_losses:.4f}, "
+                    f"Beta: {agent.beta:.4f}, Length: {episode_length}, TD Error: {mean_td_error:.4f}, "
+                    f"Q Value: {mean_q_value:.4f}"
+                )
+
             if episode % 10 == 0:
                 if agent.attention_tracker.current_index > 0:
-                    attention_values = agent.attention_tracker.attention_values[:agent.attention_tracker.current_index]
+                    attention_values = agent.attention_tracker.attention_values[
+                        : agent.attention_tracker.current_index
+                    ]
 
                     # Compute statistics efficiently on GPU
                     mean_val = attention_values.mean().item()
@@ -386,12 +449,14 @@ def train_agent(env_name, total_steps=100000, render=False):
                             step=episode,
                         )
                     else:
-                        if episode % 50 == 0: # increased
-                            print(f"Episode {episode} - Attention stats: Mean={mean_val:.4f}, Std={std_val:.4f}, "
-                                  f"Min={min_val:.4f}, Max={max_val:.4f}")
+                        if episode % 50 == 0:  # increased
+                            print(
+                                f"Episode {episode} - Attention stats: Mean={mean_val:.4f}, Std={std_val:.4f}, "
+                                f"Min={min_val:.4f}, Max={max_val:.4f}"
+                            )
 
             if episode % 100 == 0:
-                #print(f"Episode {episode}: Mean α = {torch.mean(torch.stack(list(agent.alpha.values()))).item():.4f}, τ = {agent.tau:.4f}")
+                # print(f"Episode {episode}: Mean α = {torch.mean(torch.stack(list(agent.alpha.values()))).item():.4f}, τ = {agent.tau:.4f}")
                 alert_usage()
                 if DEBUG:
                     wandb.log(
@@ -402,8 +467,10 @@ def train_agent(env_name, total_steps=100000, render=False):
                         step=episode,
                     )
                 else:
-                    print(f"Episode {episode} - Explored: {agent.exploration_count}, Exploited: {agent.exploitation_count}")
-                    
+                    print(
+                        f"Episode {episode} - Explored: {agent.exploration_count}, Exploited: {agent.exploitation_count}"
+                    )
+
                 agent.exploration_count = 0
                 agent.exploitation_count = 0
 
@@ -420,7 +487,9 @@ def train_agent(env_name, total_steps=100000, render=False):
     env.close()
 
     os.makedirs("AT_DQN_Models", exist_ok=True)
-    torch.save(agent.q_network.state_dict(), f"/atdqn_{env_name.split('/')[-1]}_model.pth")
+    torch.save(
+        agent.q_network.state_dict(), f"atdqn_{env_name.split('/')[-1]}_model.pth"
+    )
     print(f"Model saved successfully at {model_path}")
 
     if DEBUG:
@@ -436,16 +505,18 @@ if __name__ == "__main__":
             project="AT-DQN",
             name="Pong_v5",
             config={
-                "total_steps": 100000,
-                "beta_start": 0.4,
-                "beta_end": 1.0,
-                "lr": 0.00025,
-                "tau": 0.45,
+                "total_steps": config["T"],
+                "beta_start": config["beta_start"],
+                "beta_end": config["beta_end"],
+                "lr": config["lr"],
+                "tau": config["tau"],
             },
         )
     else:
         print("Running in non-debug mode, wandb logging disabled")
-        print("Config: total_steps=100000, beta_start=0.4, beta_end=1.0, lr=0.00025, tau=0.45")
-        
+        print(
+            f"Config: {config['T']}, {config['beta_start']}, beta_end={config['beta_end']}, lr={config['lr']}, tau={config['tau']}"
+        )
+
     # Train agent
-    train_agent("CartPole-v1", total_steps=100000)
+    train_agent("CartPole-v1", total_steps=config["T"])
