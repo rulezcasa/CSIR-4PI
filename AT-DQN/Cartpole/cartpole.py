@@ -64,7 +64,7 @@ def alert_usage():
 class QNetwork(nn.Module):
     def __init__(self, state_shape, action_size):
         super(QNetwork, self).__init__()
-        self.fc1 = nn.Linear(4, 32)  # cartpole input : (4,)
+        self.fc1 = nn.Linear(state_shape, 32)  # cartpole input : (4,)
         self.fc2 = nn.Linear(32, 32)
         self.fc3 = nn.Linear(32, action_size)
         self.relu = nn.ReLU()

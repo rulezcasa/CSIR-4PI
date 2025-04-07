@@ -9,7 +9,7 @@ import torch.optim as optim
 class QNetwork(nn.Module):
     def __init__(self, state_shape, action_shape):
         super(QNetwork, self).__init__()
-        self.fc1 = nn.Linear(4, 128)  # cartpole input : (4,)
+        self.fc1 = nn.Linear(state_shape, 128)  # cartpole input : (4,)
         self.fc2 = nn.Linear(128, 128)
         self.fc3 = nn.Linear(128, action_shape)
         self.relu = nn.ReLU()
@@ -22,7 +22,7 @@ class QNetwork(nn.Module):
 
 class ReplayBuffer:
     def __init__(
-        self, capacity=config["replay_buffer"], device=device
+        self, capacity, device="cuda"
     ):  # adjusting replay buffer to 50K. ()
         self.capacity = capacity
         self.device = device
@@ -86,3 +86,11 @@ class Agent:
         self.state_space=state_space
         self.action_space=action_space
         self.qnetwork=QNetwork(self.state_space, self.action_space)
+        self.lr=lr
+        self.optimizer = optim.Adam(self.q_network.parameters(), lr=self.lr)
+        self.replay_buffer=ReplayBuffer(100000, device="cuda")
+        self.gamma-0.99
+        
+        def act(self, state):
+            
+
