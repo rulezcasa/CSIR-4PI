@@ -1,13 +1,25 @@
-#conig.yml
+AT-DQN:
+  replay_buffer: 20000
+  beta_start: 0.4
+  warmup: 3000
+  beta_end: 1.0
+  sma_window: 10
+  tau: 0.4
+  T: 50000
+  gamma: 0.99
+  lr: 0.00025
+  LRU: 100000
+  target_update: 100
+  device: "cuda"
 
-replay_buffer: 100000
-beta_start : 0.4
-beta_end : 1.0
-sma_window: 10
-tau : 0.45
-T: 100000
-gamma: 0.99
-lr: 0.00025
-LRU : 100000
-target_update : 1000
-device : "mps"
+Vanilla-DQN:
+  epsilon_start: 0.9
+  epsilon_end: 0.01
+  decay_steps: 150000
+  replay_buffer: 100000
+  warmup: 5000
+  gamma: 0.99
+  device: "cuda"
+  target_update: 500
+  lr: 0.0001
+  T: 200000
