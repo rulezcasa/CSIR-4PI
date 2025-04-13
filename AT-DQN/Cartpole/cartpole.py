@@ -318,8 +318,10 @@ class ATDQNAgent:
         state_tensor = torch.tensor(
             state, dtype=torch.float32, device=self.device
         ).unsqueeze(0)
+        self.q_network.eval()
         with torch.no_grad():
-            return torch.argmax(self.q_network(state_tensor)).item()
+            action = torch.argmax(self.q_network(state_tensor)).item()
+        return action
 
     def train_step(self):
         if self.replay_buffer.size < self.check_replay_size:
@@ -387,10 +389,11 @@ def train_agent(env_name, total_steps=100000, render=False):
     for step in tqdm(range(total_steps), desc="Training Progress"):
         episode_length += 1
         action = agent.act(state)
-        next_frame, reward, done, _, _ = env.step(action)
+        next_frame, reward, terminated, truncated, _ = env.step(action)
+        done = terminated or truncated
         agent.add_experience(state, action, reward, next_frame, done)
         result = agent.train_step()
-        state = next_frame
+        state = next_frame  
         total_reward += reward
         if result is not None:
             loss, td_error, qvalue = result
