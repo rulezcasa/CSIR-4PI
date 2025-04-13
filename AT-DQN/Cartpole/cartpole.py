@@ -101,7 +101,7 @@ class ReplayBuffer:
             (capacity, 1), dtype=torch.float32, device=self.device_cpu
         )
 
-        optimization - pinned memory for faster transfers
+        #optimization - pinned memory for faster transfers
         self.states = self.states.pin_memory()
         self.actions = self.actions.pin_memory()
         self.rewards = self.rewards.pin_memory()
