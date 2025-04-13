@@ -33,9 +33,9 @@ if DEBUG:
 with open("config.yaml", "r") as f:
     config = yaml.safe_load(f)
 
-if config['device']=='mps':
+if config['AT-DQN']['device']=='mps':
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-if config['device']=='cuda':
+if config['AT-DQN']['device']=='cuda':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.backends.cudnn.benchmark = True
 
@@ -77,7 +77,7 @@ class QNetwork(nn.Module):
 
 class ReplayBuffer:
     def __init__(
-        self, capacity=config["replay_buffer"], device=device
+        self, capacity=config['AT-DQN']['replay_buffer'], device=device
     ):  # adjusting replay buffer to 50K. ()
         self.capacity = capacity
         self.device = device
@@ -140,7 +140,7 @@ class ReplayBuffer:
 # optimization - 200hrs
 class StateAttentionTrackerLRU:
     def __init__(
-        self, capacity=config["LRU"], device=device, history_length=config["sma_window"]
+        self, capacity=config['AT-DQN']["LRU"], device=device, history_length=config['AT-DQN']['sma_window']
     ):  # sma window from 1000 to 10
         self.device = device
         self.capacity = capacity
@@ -271,10 +271,10 @@ class ATDQNAgent:
         self,
         action_size,
         state_shape,
-        tau=config["tau"],
-        beta_start=config["beta_start"],
-        beta_end=config["beta_end"],
-        T=config["T"],
+        tau=config['AT-DQN']['tau'],
+        beta_start=config['AT-DQN']['beta_start'],
+        beta_end=config['AT-DQN']['beta_end'],
+        T=config['AT-DQN']['T'],
         device=device,
     ):
         self.action_size = action_size
@@ -353,7 +353,7 @@ class ATDQNAgent:
         self.optimizer.step()
 
         self.step_count += 1
-        if self.step_count % config["target_update"] == 0:
+        if self.step_count % config['AT-DQN']['target_update'] == 0:
             self.target_network.load_state_dict(self.q_network.state_dict())
 
         return (
@@ -505,18 +505,18 @@ if __name__ == "__main__":
             project="AT-DQN",
             name="Pong_v5",
             config={
-                "total_steps": config["T"],
-                "beta_start": config["beta_start"],
-                "beta_end": config["beta_end"],
-                "lr": config["lr"],
-                "tau": config["tau"],
+                "total_steps": config['AT-DQN']['T'],
+                "beta_start": config['AT-DQN']['beta_start'],
+                "beta_end": config['AT-DQN']['beta_end'],
+                "lr": config['AT-DQN']['lr'],
+                "tau": config['AT-DQN']['tau'],
             },
         )
     else:
         print("Running in non-debug mode, wandb logging disabled")
         print(
-            f"Config: {config['T']}, {config['beta_start']}, beta_end={config['beta_end']}, lr={config['lr']}, tau={config['tau']}"
+            f"Config: {config['AT-DQN']['T']}, {config['AT-DQN']['beta_start']}, beta_end={config['AT-DQN']['beta_end']}, lr={config['AT-DQN']['lr']}, tau={config['AT-DQN']['tau']}"
         )
 
     # Train agent
-    train_agent("CartPole-v1", total_steps=config["T"])
+    train_agent("CartPole-v1", total_steps=config['AT-DQN']["T"])
