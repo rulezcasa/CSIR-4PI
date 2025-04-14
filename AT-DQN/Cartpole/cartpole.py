@@ -33,12 +33,11 @@ if DEBUG:
 with open("config.yaml", "r") as f:
     config = yaml.safe_load(f)
 
-if config['AT-DQN']['device']=='mps':
+if config["AT-DQN"]["device"] == "mps":
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-if config['AT-DQN']['device']=='cuda':
+if config["AT-DQN"]["device"] == "cuda":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.backends.cudnn.benchmark = True
-
 
 
 # function to log metrics/system usage
@@ -77,7 +76,7 @@ class QNetwork(nn.Module):
 
 class ReplayBuffer:
     def __init__(
-        self, capacity=config['AT-DQN']['replay_buffer'], device=device
+        self, capacity=config["AT-DQN"]["replay_buffer"], device=device
     ):  # adjusting replay buffer to 50K. ()
         self.capacity = capacity
         self.device = device
@@ -101,7 +100,7 @@ class ReplayBuffer:
             (capacity, 1), dtype=torch.float32, device=self.device_cpu
         )
 
-        #optimization - pinned memory for faster transfers
+        # optimization - pinned memory for faster transfers
         self.states = self.states.pin_memory()
         self.actions = self.actions.pin_memory()
         self.rewards = self.rewards.pin_memory()
@@ -140,7 +139,10 @@ class ReplayBuffer:
 # optimization - 200hrs
 class StateAttentionTrackerLRU:
     def __init__(
-        self, capacity=config['AT-DQN']["LRU"], device=device, history_length=config['AT-DQN']['sma_window']
+        self,
+        capacity=config["AT-DQN"]["LRU"],
+        device=device,
+        history_length=config["AT-DQN"]["sma_window"],
     ):  # sma window from 1000 to 10
         self.device = device
         self.capacity = capacity
@@ -271,10 +273,10 @@ class ATDQNAgent:
         self,
         action_size,
         state_shape,
-        tau=config['AT-DQN']['tau'],
-        beta_start=config['AT-DQN']['beta_start'],
-        beta_end=config['AT-DQN']['beta_end'],
-        T=config['AT-DQN']['T'],
+        tau=config["AT-DQN"]["tau"],
+        beta_start=config["AT-DQN"]["beta_start"],
+        beta_end=config["AT-DQN"]["beta_end"],
+        T=config["AT-DQN"]["T"],
         device=device,
     ):
         self.action_size = action_size
@@ -355,7 +357,7 @@ class ATDQNAgent:
         self.optimizer.step()
 
         self.step_count += 1
-        if self.step_count % config['AT-DQN']['target_update'] == 0:
+        if self.step_count % config["AT-DQN"]["target_update"] == 0:
             self.target_network.load_state_dict(self.q_network.state_dict())
 
         return (
@@ -393,7 +395,7 @@ def train_agent(env_name, total_steps=100000, render=False):
         done = terminated or truncated
         agent.add_experience(state, action, reward, next_frame, done)
         result = agent.train_step()
-        state = next_frame  
+        state = next_frame
         total_reward += reward
         if result is not None:
             loss, td_error, qvalue = result
@@ -508,11 +510,11 @@ if __name__ == "__main__":
             project="AT-DQN",
             name="Pong_v5",
             config={
-                "total_steps": config['AT-DQN']['T'],
-                "beta_start": config['AT-DQN']['beta_start'],
-                "beta_end": config['AT-DQN']['beta_end'],
-                "lr": config['AT-DQN']['lr'],
-                "tau": config['AT-DQN']['tau'],
+                "total_steps": config["AT-DQN"]["T"],
+                "beta_start": config["AT-DQN"]["beta_start"],
+                "beta_end": config["AT-DQN"]["beta_end"],
+                "lr": config["AT-DQN"]["lr"],
+                "tau": config["AT-DQN"]["tau"],
             },
         )
     else:
@@ -522,4 +524,4 @@ if __name__ == "__main__":
         )
 
     # Train agent
-    train_agent("CartPole-v1", total_steps=config['AT-DQN']["T"])
+    train_agent("CartPole-v1", total_steps=config["AT-DQN"]["T"])

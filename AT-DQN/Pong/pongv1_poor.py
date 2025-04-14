@@ -9,17 +9,22 @@ import wandb
 from tqdm import tqdm
 import logging
 import sys
-import os	
+import os
 import psutil
 import hashlib
 from wandb import AlertLevel
 import pynvml
 
-#Configure logging
-logging.basicConfig(filename='logs/pongv1_train.log', level=logging.INFO, format='%(asctime)s - %(message)s')
+# Configure logging
+logging.basicConfig(
+    filename="logs/pongv1_train.log",
+    level=logging.INFO,
+    format="%(asctime)s - %(message)s",
+)
 
-#function to log metrics/system usage
-def log_into_file(episode,episode_length,total_reward,step_count):
+
+# function to log metrics/system usage
+def log_into_file(episode, episode_length, total_reward, step_count):
     # CPU usage in percentage
     cpu_usage = psutil.cpu_percent(interval=1)
 
@@ -31,35 +36,42 @@ def log_into_file(episode,episode_length,total_reward,step_count):
         pynvml.nvmlInit()
         handle = pynvml.nvmlDeviceGetHandleByIndex(0)  # First GPU
         gpu_usage = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
-        gpu_memory = pynvml.nvmlDeviceGetMemoryInfo(handle).used / pynvml.nvmlDeviceGetMemoryInfo(handle).total * 100
+        gpu_memory = (
+            pynvml.nvmlDeviceGetMemoryInfo(handle).used
+            / pynvml.nvmlDeviceGetMemoryInfo(handle).total
+            * 100
+        )
         pynvml.nvmlShutdown()
     else:
         gpu_usage, gpu_memory = 0, 0  # No GPU detected
-    
+
     logging.info(
         f"At episode {episode}:\n"
         f"Episode length (steps): {episode_length}\n"
         f"reward: {total_reward}\n"
         f"step count: {step_count}\n"
         f"CPU: {cpu_usage:.2f}%, RAM: {ram_usage:.2f}%, GPU: {gpu_usage:.2f}%, GPU Memory: {gpu_memory:.2f}%\n"
-        )
-    
-    if ram_usage>90:
-    	wandb.alert(
-    	    title='High memory usage',
-            text=f'CPU: {cpu_usage:.2f}%',
+    )
+
+    if ram_usage > 90:
+        wandb.alert(
+            title="High memory usage",
+            text=f"CPU: {cpu_usage:.2f}%",
             level=AlertLevel.WARN,
-            wait_duration=timedelta(minutes=10)
-  )
+            wait_duration=timedelta(minutes=10),
+        )
 
 
 # Preprocessing function
 def preprocess_frame(frame):
-    frame = torch.tensor(frame, dtype=torch.float32).mean(dim=-1)  
-    frame = torch.nn.functional.interpolate(frame.unsqueeze(0).unsqueeze(0), size=(84, 84)).squeeze()
+    frame = torch.tensor(frame, dtype=torch.float32).mean(dim=-1)
+    frame = torch.nn.functional.interpolate(
+        frame.unsqueeze(0).unsqueeze(0), size=(84, 84)
+    ).squeeze()
     return frame.numpy().astype(np.uint8)
-    
- # Define the Q-network using PyTorch
+
+
+# Define the Q-network using PyTorch
 class QNetwork(nn.Module):
     def __init__(self, state_shape, action_size):
         super(QNetwork, self).__init__()
@@ -77,8 +89,8 @@ class QNetwork(nn.Module):
         x = torch.flatten(x, start_dim=1)
         x = self.relu(self.fc1(x))
         return self.fc2(x)
-        
-        	
+
+
 # Replay Buffer for Experience Replay
 class ReplayBuffer:
     def __init__(self, capacity=1000000):
@@ -92,10 +104,19 @@ class ReplayBuffer:
 
     def size(self):
         return len(self.buffer)
-        
-        
+
+
 class ATDQNAgent:
-    def __init__(self, action_size, state_shape, tau=0.5, beta_start=0.4, beta_end=1.0, T=20000000, device="cuda"):
+    def __init__(
+        self,
+        action_size,
+        state_shape,
+        tau=0.5,
+        beta_start=0.4,
+        beta_end=1.0,
+        T=20000000,
+        device="cuda",
+    ):
         self.action_size = action_size
         self.device = device
 
@@ -118,24 +139,24 @@ class ATDQNAgent:
         self.exploration_count = 0
         self.exploitation_count = 0
 
-    #sha-256 hashing for efficient memory utilisation
+    # sha-256 hashing for efficient memory utilisation
     def get_state_hash(self, state):
         return hashlib.sha256(state.tobytes()).hexdigest()
 
-    #used to get attentin weight a state using hash key
+    # used to get attentin weight a state using hash key
     def get_attention(self, state):
         return self.alpha[self.get_state_hash(state)]
 
-    #update the attention of a state (importance sampled normalized weight)
+    # update the attention of a state (importance sampled normalized weight)
     def update_attention(self, state_hash, IS_td_error):
         self.alpha[state_hash] = IS_td_error
 
-    #Importance weight computation
+    # Importance weight computation
     def compute_importance_weight(self, td_error):
         priority = (abs(td_error) + 1e-6) ** 0.5
         importance_weight = (1 / (priority)) ** self.beta
         return importance_weight
-    
+
     def act(self, state):
         if self.get_attention(state) < self.tau:
             self.exploration_count += 1  # Exploration
@@ -160,25 +181,30 @@ class ATDQNAgent:
         max_next_q = target_q_values.max(dim=1)[0]
         targets = rewards + (1 - dones) * self.gamma * max_next_q
 
-        q_values = self.q_network(states).gather(1, torch.LongTensor(actions).unsqueeze(1).to(self.device)).squeeze()
+        q_values = (
+            self.q_network(states)
+            .gather(1, torch.LongTensor(actions).unsqueeze(1).to(self.device))
+            .squeeze()
+        )
         td_errors = targets - q_values
 
         # Update attention based on TD errors and importance sampling
         N = len(self.replay_buffer.buffer)
-        importance_weights = torch.FloatTensor([
-            self.compute_importance_weight(td_errors[i]) for i in range(32)
-        ]).to(self.device)
+        importance_weights = torch.FloatTensor(
+            [self.compute_importance_weight(td_errors[i]) for i in range(32)]
+        ).to(self.device)
         # mix max normalizing : [0,1]
-        importance_weights = (importance_weights - importance_weights.min()) / (importance_weights.max() - importance_weights.min() + 1e-6)
-
+        importance_weights = (importance_weights - importance_weights.min()) / (
+            importance_weights.max() - importance_weights.min() + 1e-6
+        )
 
         # using importance weights to update attention for the batch
         for i in range(32):
-            state_hash=self.get_state_hash(states[i].cpu().numpy())
+            state_hash = self.get_state_hash(states[i].cpu().numpy())
             self.update_attention(state_hash, importance_weights[i].item())
 
-        # MSE loss 
-        loss = torch.mean(td_errors ** 2)
+        # MSE loss
+        loss = torch.mean(td_errors**2)
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -190,18 +216,23 @@ class ATDQNAgent:
 
         return loss.item(), td_errors.abs().mean().item()
 
-
     def anneal_beta(self):
         if self.replay_buffer.size() >= 50000:
-        	self.beta = min(self.beta + self.delta_beta, self.beta_end)
+            self.beta = min(self.beta + self.delta_beta, self.beta_end)
 
 
-wandb.init(project="AT-DQN", name="Pong_v1", config={"total_steps": 20000000, "beta_start":0.4, "beta_end":1.0, "lr":0.00025})
-env = gym.make('ALE/Pong-v5')
+wandb.init(
+    project="AT-DQN",
+    name="Pong_v1",
+    config={"total_steps": 20000000, "beta_start": 0.4, "beta_end": 1.0, "lr": 0.00025},
+)
+env = gym.make("ALE/Pong-v5")
 state, _ = env.reset()
 state_shape = (4, 84, 84)
 action_size = env.action_space.n
-agent = ATDQNAgent(action_size, state_shape, device="cuda" if torch.cuda.is_available() else "cpu")
+agent = ATDQNAgent(
+    action_size, state_shape, device="cuda" if torch.cuda.is_available() else "cpu"
+)
 
 total_steps = 20000000  # Training for 20 million steps
 total_cumulative_reward = 0
@@ -209,16 +240,18 @@ state = preprocess_frame(state)
 state_stack = np.stack([state] * 4, axis=0)
 total_reward = 0
 losses = []
-episode=0
-episode_length=0
-td_errors_per_episode = []  
+episode = 0
+episode_length = 0
+td_errors_per_episode = []
 
 for step in tqdm(range(total_steps), desc="Training Progress"):
     episode_length += 1  # Tracking episode length in steps
     action = agent.act(state_stack)
     next_frame, reward, done, _, _ = env.step(action)
     next_frame = preprocess_frame(next_frame)
-    next_state_stack = np.concatenate((state_stack[1:], np.expand_dims(next_frame, axis=0)), axis=0)
+    next_state_stack = np.concatenate(
+        (state_stack[1:], np.expand_dims(next_frame, axis=0)), axis=0
+    )
 
     agent.replay_buffer.add((state_stack, action, reward, next_state_stack, done))
     result = agent.train_step()
@@ -233,46 +266,55 @@ for step in tqdm(range(total_steps), desc="Training Progress"):
     if done:
         episode += 1
         mean_losses = np.mean(losses) if losses else 0.0
-        mean_td_error = np.mean(td_errors_per_episode) if td_errors_per_episode else 0.0  
+        mean_td_error = np.mean(td_errors_per_episode) if td_errors_per_episode else 0.0
 
-        wandb.log({
-            "global stepcount after every episode": step + 1,
-            "Reward per episode": total_reward,
-            "Mean loss per episode": mean_losses,
-            "Beta per episode": agent.beta,
-            "Episode length": episode_length,
-            "Mean TD Error per episode": mean_td_error,  
-        })
-        
+        wandb.log(
+            {
+                "global stepcount after every episode": step + 1,
+                "Reward per episode": total_reward,
+                "Mean loss per episode": mean_losses,
+                "Beta per episode": agent.beta,
+                "Episode length": episode_length,
+                "Mean TD Error per episode": mean_td_error,
+            }
+        )
+
         # Log every 10 episodes
         if episode % 10 == 0:
-            attention_values = list(agent.alpha.values())  # Extract all attention weights
+            attention_values = list(
+                agent.alpha.values()
+            )  # Extract all attention weights
             if attention_values:  # Ensure there are values to log
-                wandb.log({
-                    "Attention Mean": np.mean(attention_values),
-                    "Attention Std": np.std(attention_values),
-                    "Attention Min": np.min(attention_values),
-                    "Attention Max": np.max(attention_values),
-                })
+                wandb.log(
+                    {
+                        "Attention Mean": np.mean(attention_values),
+                        "Attention Std": np.std(attention_values),
+                        "Attention Min": np.min(attention_values),
+                        "Attention Max": np.max(attention_values),
+                    }
+                )
 
         # Log every 100 episodes
         if episode % 100 == 0:
-            #print(f"Episode {episode}: Mean α = {np.mean(list(agent.alpha.values()))}, τ = {agent.tau}")
+            # print(f"Episode {episode}: Mean α = {np.mean(list(agent.alpha.values()))}, τ = {agent.tau}")
             log_into_file(episode, episode_length, total_reward, agent.step_count)
-            wandb.log({
-                "Total Explored States every 100 episodes": agent.exploration_count,
-                "Total Exploited States every 100 episodes": agent.exploitation_count
-            })
+            wandb.log(
+                {
+                    "Total Explored States every 100 episodes": agent.exploration_count,
+                    "Total Exploited States every 100 episodes": agent.exploitation_count,
+                }
+            )
             agent.exploration_count = 0
             agent.exploitation_count = 0
 
- 
         state, _ = env.reset()
         state = preprocess_frame(state)
-        state_stack = np.stack([state] * 4, axis=0) #stacks the first frame 4 times discarding previous frames
+        state_stack = np.stack(
+            [state] * 4, axis=0
+        )  # stacks the first frame 4 times discarding previous frames
         total_reward = 0
         losses = []
-        episode_length=0
+        episode_length = 0
 
     agent.anneal_beta()
 
