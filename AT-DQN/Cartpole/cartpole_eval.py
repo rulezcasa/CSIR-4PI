@@ -33,7 +33,7 @@ action_space= env.action_space.n
 
 
 model = QNetwork(state_space, action_space).to(device)
-model.load_state_dict(torch.load("/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole/AT_DQN_Models/atdqn_CartPole-v3_model.pth"))  # change filename as needed
+model.load_state_dict(torch.load("/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole/AT_DQN_Models/Vanilla_MSE-v2_model.pth"))  # change filename as needed
 model.eval()
 
 
@@ -55,6 +55,4 @@ while not done:
 
 env.close()
 print(f"Total reward: {total_reward}")
-
-
 

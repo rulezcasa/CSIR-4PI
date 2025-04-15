@@ -136,12 +136,15 @@ class Agent:
             return None
         
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(128)
-        
-        # optimization - gpu
+    
+        #Double DQN target calculations
         with torch.no_grad():
-            target_q_values = self.target_network(next_states)
-            max_next_q = target_q_values.max(dim=1, keepdim=True)[0]
-            targets = rewards + (1 - dones) * self.gamma * max_next_q
+            #selecting the best action using the online network
+            next_actions=self.q_network(next_states).argmax(dim=1, keepdim=True)
+
+            #Evaluate the action using the target network
+            selected_next_q=self.target_network(next_states).gather(1,next_actions)
+            targets = rewards + (1 - dones) * self.gamma * selected_next_q
 
         q_values = self.q_network(states).gather(1, actions.long())
         td_errors = targets - q_values        
@@ -273,7 +276,7 @@ def train_agent(env_name, render=False):
 
     os.makedirs("AT_DQN_Models", exist_ok=True)
     torch.save(
-        agent.q_network.state_dict(), f"AT_DQN_Models/vanilla_{env_name.split('/')[-1]}_model.pth"
+        agent.q_network.state_dict(), f"AT_DQN_Models/DDQN_{env_name.split('/')[-1]}_model.pth"
     )
     print(f"Model saved successfully!")
 
@@ -288,7 +291,7 @@ if __name__ == "__main__":
     if DEBUG:
         wandb.init(
             project="AT-DQN",
-            name="cartpole_vanilla_huber_v2",
+            name="cartpole_DDQN_v3",
             config={
                 "total_steps": config['Vanilla-DQN']['T'],
                 "epsilon_start": config['Vanilla-DQN']['epsilon_start'],

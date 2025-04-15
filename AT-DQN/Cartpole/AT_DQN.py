@@ -64,6 +64,9 @@ class ReplayBuffer:
         self.dones = torch.zeros(
             (capacity, 1), dtype=torch.float32, device=self.device_cpu
         )
+        self.attention_weight = torch.zeros(
+            (capacity, 1), dtype=torch.float32, device=self.device_cpu
+        )
 
     # #optimization - pinned memory for faster transfers
     #     self.states = self.states.pin_memory()
@@ -99,6 +102,145 @@ class ReplayBuffer:
             self.next_states[indices].to(self.device),
             self.dones[indices].to(self.device),
         )
+    def update_attention_weights(self, indices, attention_values):
+        if isinstance(indices, torch.Tensor):
+            indices = indices.cpu().numpy()  # Ensure indexing works on CPU tensors
+
+        if attention_values.dim() == 1:
+            attention_values = attention_values.unsqueeze(1)  # (batch_size, 1)
+
+            self.attention_weight[indices] = attention_values.detach().cpu()
+
+class StateAttentionTrackerLRU:
+    def __init__(
+        self,
+        capacity=config["AT-DQN"]["LRU"],
+        device=device,
+        history_length=config["AT-DQN"]["sma_window"],
+    ):  # sma window from 1000 to 10
+        self.device = device
+        self.capacity = capacity
+        self.history_length = history_length
+        self.attention_values = (
+            torch.ones(capacity, dtype=torch.float32, device=device) * 0.25
+        )
+        self.attention_history = torch.zeros(
+            (capacity, history_length), dtype=torch.float32, device=device
+        )  ## CHECK!
+        self.history_counts = torch.zeros(
+            capacity, dtype=torch.long, device=device
+        )  ## CHECK!
+
+        self.current_index = 0
+        self.hash_to_index = {}
+        self.last_access = torch.zeros(capacity, dtype=torch.long, device=device)
+        self.access_counter = 0  # Timestep for each state accessed
+
+    def get_state_hash(self, state):  # Function to hash state
+        if isinstance(state, torch.Tensor):  # if tensor then
+            if state.device != torch.device("cpu"):
+                state_bytes = state.cpu().numpy().tobytes()
+            else:
+                state_bytes = state.numpy().tobytes()
+        else:  # if array then
+            state_bytes = np.asarray(state).tobytes()
+        return xxhash.xxh3_64(state_bytes).hexdigest()
+
+    def get_state_index(self, state):  # Retrieve index or create new in LRU
+        state_hash = self.get_state_hash(state)
+        self.access_counter += 1
+
+        if state_hash in self.hash_to_index:  # state already exists
+            idx = self.hash_to_index[state_hash]
+            self.last_access[idx] = (
+                self.access_counter
+            )  # update access time of this state
+            return idx  # return the index
+
+        if self.current_index < self.capacity:
+            idx = self.current_index
+            self.current_index += 1
+        else:
+            used_indices = torch.arange(self.current_index, device=self.device)
+            idx = used_indices[
+                torch.argmin(self.last_access[: self.current_index])
+            ].item()
+            old_hash = None
+            for h, i in list(self.hash_to_index.items()):
+                if i == idx:
+                    old_hash = h
+                    break
+            if old_hash:
+                del self.hash_to_index[old_hash]
+            self.history_counts[idx] = 0
+            self.attention_history[idx].zero_()
+
+        self.hash_to_index[state_hash] = idx
+        self.last_access[idx] = self.access_counter
+
+        return idx  # returns index after removing and adding new
+
+    def batch_get_indices(self, states):  # get index for the batch
+        return torch.tensor(
+            [self.get_state_index(state) for state in states],
+            device=self.device,
+            dtype=torch.long,
+        )
+
+    def get_attention(self, state):  # get attention value for the state index
+        idx = self.get_state_index(state)
+        return self.attention_values[idx]
+
+    def batch_get_attention(self, states):  # batch processing
+        indices = self.batch_get_indices(states)
+        return self.attention_values[indices]
+
+    def update_attention(self, states, importance_weights):
+        # Convert to tensor if needed - validate
+        if not isinstance(importance_weights, torch.Tensor):
+            importance_weights = torch.tensor(
+                importance_weights, dtype=torch.float32, device=self.device
+            )
+        indices = self.batch_get_indices(states)
+
+        # optimization - vectorization
+        for i, idx in enumerate(indices):
+            pos = self.history_counts[idx] % self.history_length
+            self.attention_history[idx, pos] = importance_weights[i]
+            self.history_counts[idx] += 1
+
+        unique_indices = torch.unique(indices)
+        for idx in unique_indices:
+            count = min(self.history_counts[idx].item(), self.history_length)
+            if count > 0:
+                valid_history = self.attention_history[idx, :count]
+                self.attention_values[idx] = valid_history.mean()
+
+        self.normalize_attention()
+
+    def normalize_attention(self):
+        if self.current_index == 0:
+            return
+        used_values = self.attention_values[: self.current_index]
+        min_val = used_values.min()
+        max_val = used_values.max()
+
+        if min_val == max_val:
+            return
+        used_values.sub_(min_val).div_(max_val - min_val)
+
+    def compute_importance_weight(self, td_errors, beta):
+        priority = td_errors.abs() + 1e-6
+        return (1 / priority) ** beta
+
+    def to(self, device):
+        self.device = device
+        self.attention_values = self.attention_values.to(device)
+        self.attention_history = self.attention_history.to(device)
+        self.history_counts = self.history_counts.to(device)
+        self.last_access = self.last_access.to(device)
+        return self
+
     
 class Agent:
     def __init__(self, state_space, action_space, lr):
@@ -115,6 +257,20 @@ class Agent:
         self.exploitation_count=0
         self.check_replay_size=config['Vanilla-DQN']['warmup'] #warmup steps
         self.step_count=0
+    
+    def compute_attention_weight(self, td_errors, threshold_low, threshold_high):
+        abs_td_errors = td_errors.abs().squeeze()  # shape: (batch,)
+        attention_weights = torch.where(
+            abs_td_errors < threshold_low,
+            torch.tensor(0.0, device=abs_td_errors.device),
+            torch.where(
+                abs_td_errors < threshold_high,
+                torch.tensor(0.5, device=abs_td_errors.device),
+                torch.tensor(1.0, device=abs_td_errors.device)
+        )
+    )
+        return attention_weights
+
         
     def act(self, state, epsilon):
         state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(device)
@@ -135,7 +291,7 @@ class Agent:
         if self.replay_buffer.size < self.check_replay_size:
             return None
         
-        states, actions, rewards, next_states, dones = self.replay_buffer.sample(128)
+        states, actions, rewards, next_states, dones, indices = self.replay_buffer.sample(128)
         
         # optimization - gpu
         with torch.no_grad():
@@ -144,8 +300,10 @@ class Agent:
             targets = rewards + (1 - dones) * self.gamma * max_next_q
 
         q_values = self.q_network(states).gather(1, actions.long())
-        td_errors = targets - q_values        
-        loss_fn = torch.nn.SmoothL1Loss()
+        td_errors = targets - q_values
+        attention_values=self.compute_attention_weight(td_errors,threshold_low=, threshold_high=)
+        self.replay_buffer.update_attention_weights(indices, attention_values)
+        loss_fn = torch.nn.MSELoss()
         loss = loss_fn(q_values, targets)
         self.optimizer.zero_grad()
         loss.backward()

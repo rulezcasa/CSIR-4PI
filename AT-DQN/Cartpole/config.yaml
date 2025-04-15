@@ -14,7 +14,7 @@ AT-DQN:
 
 Vanilla-DQN:
   epsilon_start: 0.9
-  epsilon_end: 0.1
+  epsilon_end: 0.05
   decay_steps: 80000
   replay_buffer: 100000
   warmup: 5000
@@ -22,4 +22,4 @@ Vanilla-DQN:
   device: "mps"
   target_update: 1000
   lr: 0.00007
-  T: 200000
+  T: 230000
