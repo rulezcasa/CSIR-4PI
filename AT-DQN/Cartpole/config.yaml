@@ -1,16 +1,17 @@
 AT-DQN:
-  replay_buffer: 20000
+  replay_buffer: 100000
   beta_start: 0.4
-  warmup: 3000
+  warmup: 5000
   beta_end: 1.0
   sma_window: 10
   tau: 0.4
-  T: 50000
+  T: 200000
   gamma: 0.99
-  lr: 0.00025
+  lr: 0.00007
   LRU: 100000
-  target_update: 100
-  device: "cuda"
+  target_update: 1000
+  device: "mps"
+  initial_attention: 0.6
 
 Vanilla-DQN:
   epsilon_start: 0.9

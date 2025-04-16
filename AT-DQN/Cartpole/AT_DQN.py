@@ -9,7 +9,8 @@ import cv2
 import yaml
 from datetime import timedelta
 import pdb
-DEBUG = True
+import xxhash
+DEBUG = False
 if DEBUG:
     import wandb
     from wandb import AlertLevel
@@ -18,9 +19,9 @@ if DEBUG:
 with open("config.yaml", "r") as f:
     config = yaml.safe_load(f)
 
-if config['Vanilla-DQN']['device']=='mps':
+if config['AT-DQN']['device']=='mps':
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-if config['Vanilla-DQN']['device']=='cuda':
+if config['AT-DQN']['device']=='cuda':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.backends.cudnn.benchmark = True
 
@@ -64,9 +65,7 @@ class ReplayBuffer:
         self.dones = torch.zeros(
             (capacity, 1), dtype=torch.float32, device=self.device_cpu
         )
-        self.attention_weight = torch.zeros(
-            (capacity, 1), dtype=torch.float32, device=self.device_cpu
-        )
+
 
     # #optimization - pinned memory for faster transfers
     #     self.states = self.states.pin_memory()
@@ -112,32 +111,18 @@ class ReplayBuffer:
             self.attention_weight[indices] = attention_values.detach().cpu()
 
 class StateAttentionTrackerLRU:
-    def __init__(
-        self,
-        capacity=config["AT-DQN"]["LRU"],
-        device=device,
-        history_length=config["AT-DQN"]["sma_window"],
-    ):  # sma window from 1000 to 10
-        self.device = device
-        self.capacity = capacity
-        self.history_length = history_length
-        self.attention_values = (
-            torch.ones(capacity, dtype=torch.float32, device=device) * 0.25
-        )
-        self.attention_history = torch.zeros(
-            (capacity, history_length), dtype=torch.float32, device=device
-        )  ## CHECK!
-        self.history_counts = torch.zeros(
-            capacity, dtype=torch.long, device=device
-        )  ## CHECK!
-
-        self.current_index = 0
-        self.hash_to_index = {}
-        self.last_access = torch.zeros(capacity, dtype=torch.long, device=device)
-        self.access_counter = 0  # Timestep for each state accessed
+    def __init__(self, capacity, device, track_indices=None):
+        self.device=device
+        self.capacity=capacity
+        self.attention_values=(torch.ones(capacity, dtype=torch.float32, device=device))*config["AT-DQN"]["initial_attention"]
+        self.current_index=0
+        self.hash_to_index={} #dicitonary holding a state-attention pairs
+        self.last_access = torch.zeros(capacity, dtype=torch.long, device=device) #pytorch tensor that stores the access time of each state (stored as index corresponding to hash_to_index)
+        self.access_counter = 0  #global counter tracking when which state is accessed
+        self.track_indices = track_indices if track_indices is not None else []  # List of fixed indices to track attention
 
     def get_state_hash(self, state):  # Function to hash state
-        if isinstance(state, torch.Tensor):  # if tensor then
+        if isinstance(state, torch.Tensor):  
             if state.device != torch.device("cpu"):
                 state_bytes = state.cpu().numpy().tobytes()
             else:
@@ -145,101 +130,101 @@ class StateAttentionTrackerLRU:
         else:  # if array then
             state_bytes = np.asarray(state).tobytes()
         return xxhash.xxh3_64(state_bytes).hexdigest()
+    
+    def get_state_index(self, state):
+        state_hash=self.get_state_hash(state)
+        self.access_counter+=1
 
-    def get_state_index(self, state):  # Retrieve index or create new in LRU
-        state_hash = self.get_state_hash(state)
-        self.access_counter += 1
-
-        if state_hash in self.hash_to_index:  # state already exists
-            idx = self.hash_to_index[state_hash]
-            self.last_access[idx] = (
-                self.access_counter
-            )  # update access time of this state
-            return idx  # return the index
-
-        if self.current_index < self.capacity:
-            idx = self.current_index
-            self.current_index += 1
-        else:
-            used_indices = torch.arange(self.current_index, device=self.device)
+        if state_hash in self.hash_to_index: #if state already exists
+            idx=self.hash_to_index[state_hash]
+            self.last_access[idx]=self.access_counter
+            return idx
+    
+        if self.current_index<self.capacity: #if capacity not full and state doesn't exist
+            idx=self.current_index
+            self.current_index+=1   #return the current_index
+            return idx
+        
+        else:  #if LRU full
+            used_indices = torch.arange(self.current_index, device=self.device) #indices already used in LRU aranged from 0 to current_index
             idx = used_indices[
-                torch.argmin(self.last_access[: self.current_index])
+                torch.argmin(self.last_access[: self.current_index]) #Finds the index with minimum last access value
             ].item()
             old_hash = None
             for h, i in list(self.hash_to_index.items()):
-                if i == idx:
+                if i == idx:                #find the hash of state corresponding to least used index
                     old_hash = h
                     break
             if old_hash:
-                del self.hash_to_index[old_hash]
-            self.history_counts[idx] = 0
-            self.attention_history[idx].zero_()
+                del self.hash_to_index[old_hash] #delete the old hashed state
 
-        self.hash_to_index[state_hash] = idx
-        self.last_access[idx] = self.access_counter
+        self.hash_to_index[state_hash] = idx #new state's hash is assigned to that index
+        self.last_access[idx] = self.access_counter #last access to current access counter
 
         return idx  # returns index after removing and adding new
-
-    def batch_get_indices(self, states):  # get index for the batch
+    
+    
+    def batch_get_indices(self, states):  # vector index retrieval
         return torch.tensor(
             [self.get_state_index(state) for state in states],
             device=self.device,
             dtype=torch.long,
         )
-
-    def get_attention(self, state):  # get attention value for the state index
-        idx = self.get_state_index(state)
-        return self.attention_values[idx]
-
-    def batch_get_attention(self, states):  # batch processing
+    
+    def batch_get_attention(self, states):  # vector get attention values for the retrieved indices
         indices = self.batch_get_indices(states)
         return self.attention_values[indices]
-
-    def update_attention(self, states, importance_weights):
+    
+    def get_attention(self, state):  # get attention value for a single state index (used to act)
+        idx = self.get_state_index(state)
+        return self.attention_values[idx]
+    
+    def update_attention(self, states, weights):
         # Convert to tensor if needed - validate
-        if not isinstance(importance_weights, torch.Tensor):
-            importance_weights = torch.tensor(
-                importance_weights, dtype=torch.float32, device=self.device
+        if not isinstance(weights, torch.Tensor):
+            weights = torch.tensor(
+                weights, dtype=torch.float32, device=self.device
             )
-        indices = self.batch_get_indices(states)
+        indices = self.batch_get_indices(states) #retrieve indices of states to be updated (in turn calls get_state_index to handle LRU)
 
-        # optimization - vectorization
-        for i, idx in enumerate(indices):
-            pos = self.history_counts[idx] % self.history_length
-            self.attention_history[idx, pos] = importance_weights[i]
-            self.history_counts[idx] += 1
-
-        unique_indices = torch.unique(indices)
-        for idx in unique_indices:
-            count = min(self.history_counts[idx].item(), self.history_length)
-            if count > 0:
-                valid_history = self.attention_history[idx, :count]
-                self.attention_values[idx] = valid_history.mean()
-
+        self.attention_values[indices]=weights
         self.normalize_attention()
-
+    
     def normalize_attention(self):
-        if self.current_index == 0:
+        if self.current_index == 0: #if empty, do nothing
             return
-        used_values = self.attention_values[: self.current_index]
-        min_val = used_values.min()
-        max_val = used_values.max()
+        used_values = self.attention_values[: self.current_index] #select only available values
+        min_val = used_values.min() #compute min value amongst available
+        max_val = used_values.max() #compute max value amongst available
 
-        if min_val == max_val:
+        if min_val == max_val: #if min value and max value are same, do nothing
             return
-        used_values.sub_(min_val).div_(max_val - min_val)
-
-    def compute_importance_weight(self, td_errors, beta):
-        priority = td_errors.abs() + 1e-6
-        return (1 / priority) ** beta
-
+        used_values.sub_(min_val).div_(max_val - min_val) #other min mas normalize
+    
+    def compute_attention(self, td_errors):
+        weights=td_errors.abs() + 1e-6
+        return weights
+    
     def to(self, device):
         self.device = device
         self.attention_values = self.attention_values.to(device)
-        self.attention_history = self.attention_history.to(device)
-        self.history_counts = self.history_counts.to(device)
         self.last_access = self.last_access.to(device)
         return self
+
+    def track_attention_values(self, tracker_log, global_step):
+        attention_values_to_return = []
+    
+        # Log the attention values for the specific fixed indices
+        for i, idx in enumerate(self.track_indices):
+            if idx < self.current_index:  # Ensure index is valid
+                attn_value = self.attention_values[idx]
+                tracker_log[i].append(attn_value.detach().cpu())  # Store on CPU to save GPU memory
+                attention_values_to_return.append(attn_value.detach().cpu())
+    
+        return attention_values_to_return
+
+
+        
 
     
 class Agent:
@@ -251,47 +236,38 @@ class Agent:
         self.target_network.load_state_dict(self.q_network.state_dict())
         self.lr=lr
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=self.lr)
-        self.replay_buffer=ReplayBuffer(config['Vanilla-DQN']['replay_buffer'], device=device)
-        self.gamma=config['Vanilla-DQN']['gamma']
+        self.replay_buffer=ReplayBuffer(config['AT-DQN']['replay_buffer'], device=device)
+        self.gamma=config['AT-DQN']['gamma']
         self.exploration_count=0
         self.exploitation_count=0
-        self.check_replay_size=config['Vanilla-DQN']['warmup'] #warmup steps
+        self.check_replay_size=config['AT-DQN']['warmup'] #warmup steps
         self.step_count=0
-    
-    def compute_attention_weight(self, td_errors, threshold_low, threshold_high):
-        abs_td_errors = td_errors.abs().squeeze()  # shape: (batch,)
-        attention_weights = torch.where(
-            abs_td_errors < threshold_low,
-            torch.tensor(0.0, device=abs_td_errors.device),
-            torch.where(
-                abs_td_errors < threshold_high,
-                torch.tensor(0.5, device=abs_td_errors.device),
-                torch.tensor(1.0, device=abs_td_errors.device)
-        )
-    )
-        return attention_weights
-
+        fixed_states_indices = [0, 1, 2]
+        self.attention_tracker=StateAttentionTrackerLRU(config["AT-DQN"]["LRU"], device, track_indices=fixed_states_indices)
+        self.tau=config["AT-DQN"]["tau"]
         
-    def act(self, state, epsilon):
+    
+        
+    def act(self, state):
         state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(device)
-
+        
         self.q_network.eval()
         with torch.no_grad():
             action_values = self.q_network(state_tensor)
         self.q_network.train()
 
-        if np.random.random() > epsilon: #exploit
-            self.exploitation_count+=1        	
-            return action_values.argmax(dim=1).item()
-        else:
-            self.exploration_count+=1 
+        if self.attention_tracker.get_attention(state).item() > self.tau: #CHECK! not using importance weight atm
+            self.exploitation_count=+1 
             return np.random.randint(self.action_space)
+        else:
+            self.exploitation_count+=1
+            return action_values.argmax(dim=1).item()
             
     def train_step(self):
         if self.replay_buffer.size < self.check_replay_size:
             return None
         
-        states, actions, rewards, next_states, dones, indices = self.replay_buffer.sample(128)
+        states, actions, rewards, next_states, dones = self.replay_buffer.sample(128)
         
         # optimization - gpu
         with torch.no_grad():
@@ -301,8 +277,10 @@ class Agent:
 
         q_values = self.q_network(states).gather(1, actions.long())
         td_errors = targets - q_values
-        attention_values=self.compute_attention_weight(td_errors,threshold_low=, threshold_high=)
-        self.replay_buffer.update_attention_weights(indices, attention_values)
+        
+        attention_values=self.attention_tracker.compute_attention(td_errors)
+        self.attention_tracker.update_attention(states, attention_values.squeeze())
+
         loss_fn = torch.nn.MSELoss()
         loss = loss_fn(q_values, targets)
         self.optimizer.zero_grad()
@@ -313,7 +291,7 @@ class Agent:
         self.optimizer.step()
         
         self.step_count+=1
-        if self.step_count%config['Vanilla-DQN']['target_update']==0:
+        if self.step_count%config['AT-DQN']['target_update']==0:
             self.target_network.load_state_dict(self.q_network.state_dict())
         return (
             loss.item(),
@@ -325,12 +303,8 @@ class Agent:
         self.replay_buffer.add(state, action, reward, next_state, done)        
         
 def train_agent(env_name, render=False):
-    total_steps=config['Vanilla-DQN']['T']
-    epsilon_start=config['Vanilla-DQN']['epsilon_start']
-    epsilon_end=config['Vanilla-DQN']['epsilon_end']
-    decay_steps=config['Vanilla-DQN']['decay_steps']
-    lr=config['Vanilla-DQN']['lr']
-    epsilon=epsilon_start
+    total_steps=config['AT-DQN']['T']
+    lr=config['AT-DQN']['lr']
     
     total_reward = 0
     losses = []
@@ -344,18 +318,15 @@ def train_agent(env_name, render=False):
     state_shape = env.observation_space.shape
     action_size = env.action_space.n
     agent = Agent(state_shape, action_size, lr)
+
     
     
     
 
-
+    tracker_log = {i: [] for i in range(3)} 
+    
     for step in tqdm(range(total_steps), desc="Training Progress"):
-        episode_length += 1
-        if step < decay_steps:
-            epsilon = epsilon_start - (step / decay_steps) * (epsilon_start - epsilon_end)       
-        else:
-            epsilon = epsilon_end
-        action = agent.act(state,epsilon)
+        action = agent.act(state)
         next_frame, reward, terminated, truncated, _ = env.step(action)
         done = terminated or truncated
         agent.add_experience(state, action, reward, next_frame, done)
@@ -375,6 +346,14 @@ def train_agent(env_name, render=False):
                 np.mean(td_errors_per_episode) if td_errors_per_episode else 0.0
             )
             mean_q_value = np.mean(q_values) if q_values else 0.0
+            attention_values = agent.attention_tracker.track_attention_values(tracker_log, step)
+            att1=attention_values[0]
+            att2=attention_values[1]
+            att3=attention_values[2]
+
+
+        
+
 
             if DEBUG:
                 wandb.log(
@@ -385,7 +364,9 @@ def train_agent(env_name, render=False):
                         "episode_length": episode_length,
                         "mean_td_error": mean_td_error,
                         "mean_q_value": mean_q_value,
-                        "epsilon":epsilon,
+                        "attention_value1": att1,
+                        "attention_value2": att2,
+                        "attention_value3": att3,    # Log attention values for the fixed states
                     },
                     step=episode,
                 )
@@ -431,7 +412,7 @@ def train_agent(env_name, render=False):
 
     os.makedirs("AT_DQN_Models", exist_ok=True)
     torch.save(
-        agent.q_network.state_dict(), f"AT_DQN_Models/vanilla_{env_name.split('/')[-1]}_model.pth"
+        agent.q_network.state_dict(), f"AT_DQN_Models/ATDQN_{env_name.split('/')[-1]}_model.pth"
     )
     print(f"Model saved successfully!")
 
@@ -446,18 +427,17 @@ if __name__ == "__main__":
     if DEBUG:
         wandb.init(
             project="AT-DQN",
-            name="cartpole_vanilla_huber_v2",
+            name="cartpole_ATDQN_v2",
             config={
-                "total_steps": config['Vanilla-DQN']['T'],
-                "epsilon_start": config['Vanilla-DQN']['epsilon_start'],
-                "epsilon_end": config['Vanilla-DQN']['epsilon_end'],
-                "lr": config['Vanilla-DQN']["lr"],
+                "total_steps": config['AT-DQN']['T'],
+                "LRU": config['AT-DQN']['LRU'],
+                "lr": config['AT-DQN']["lr"],
             },
         )
     else:
         print("Running in non-debug mode, wandb logging disabled")
         print(
-            f"Config: {config['Vanilla-DQN']['T']}, {config['Vanilla-DQN']['epsilon_start']}, beta_end={config['Vanilla-DQN']['epsilon_end']}, lr={config['Vanilla-DQN']['lr']}"
+            f"Config: {config['AT-DQN']['T']}, lr={config['AT-DQN']['lr']}"
         )
 
     # Train agent
