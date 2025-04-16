@@ -8,10 +8,10 @@ AT-DQN:
   T: 200000
   gamma: 0.99
   lr: 0.00007
-  LRU: 100000
+  LRU: 250000
   target_update: 1000
   device: "mps"
-  initial_attention: 0.6
+  initial_attention: 0.9
 
 Vanilla-DQN:
   epsilon_start: 0.9

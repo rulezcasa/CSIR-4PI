@@ -10,7 +10,7 @@ import yaml
 from datetime import timedelta
 import pdb
 import xxhash
-DEBUG = False
+DEBUG = True
 if DEBUG:
     import wandb
     from wandb import AlertLevel
@@ -81,7 +81,7 @@ class ReplayBuffer:
         self.actions[self.position] = action
         self.rewards[self.position] = reward
         self.next_states[self.position] = torch.tensor(next_state, dtype=torch.float32)
-        self.dones[self.position] = done
+        self.dones[self.position] = done    
 
         self.position = (
             self.position + 1
@@ -188,7 +188,7 @@ class StateAttentionTrackerLRU:
         indices = self.batch_get_indices(states) #retrieve indices of states to be updated (in turn calls get_state_index to handle LRU)
 
         self.attention_values[indices]=weights
-        self.normalize_attention()
+        #self.normalize_attention()
     
     def normalize_attention(self):
         if self.current_index == 0: #if empty, do nothing
@@ -202,26 +202,19 @@ class StateAttentionTrackerLRU:
         used_values.sub_(min_val).div_(max_val - min_val) #other min mas normalize
     
     def compute_attention(self, td_errors):
-        weights=td_errors.abs() + 1e-6
+        weights = torch.where(td_errors > 0.4, 0.9, 0.1)
         return weights
+         
+    
+    # def compute_attention(self, td_errors):
+    #     weights=td_errors.abs() + 1e-6
+    #     return weights
     
     def to(self, device):
         self.device = device
         self.attention_values = self.attention_values.to(device)
         self.last_access = self.last_access.to(device)
         return self
-
-    def track_attention_values(self, tracker_log, global_step):
-        attention_values_to_return = []
-    
-        # Log the attention values for the specific fixed indices
-        for i, idx in enumerate(self.track_indices):
-            if idx < self.current_index:  # Ensure index is valid
-                attn_value = self.attention_values[idx]
-                tracker_log[i].append(attn_value.detach().cpu())  # Store on CPU to save GPU memory
-                attention_values_to_return.append(attn_value.detach().cpu())
-    
-        return attention_values_to_return
 
 
         
@@ -257,7 +250,7 @@ class Agent:
         self.q_network.train()
 
         if self.attention_tracker.get_attention(state).item() > self.tau: #CHECK! not using importance weight atm
-            self.exploitation_count=+1 
+            self.exploration_count+=1 
             return np.random.randint(self.action_space)
         else:
             self.exploitation_count+=1
@@ -322,10 +315,8 @@ def train_agent(env_name, render=False):
     
     
     
-
-    tracker_log = {i: [] for i in range(3)} 
-    
     for step in tqdm(range(total_steps), desc="Training Progress"):
+        episode_length += 1
         action = agent.act(state)
         next_frame, reward, terminated, truncated, _ = env.step(action)
         done = terminated or truncated
@@ -346,16 +337,20 @@ def train_agent(env_name, render=False):
                 np.mean(td_errors_per_episode) if td_errors_per_episode else 0.0
             )
             mean_q_value = np.mean(q_values) if q_values else 0.0
-            attention_values = agent.attention_tracker.track_attention_values(tracker_log, step)
-            att1=attention_values[0]
-            att2=attention_values[1]
-            att3=attention_values[2]
-
-
-        
 
 
             if DEBUG:
+                bar_data = [
+                    ["Explored", agent.exploration_count],
+                    ["Exploited", agent.exploitation_count]
+                ]
+                bar_table = wandb.Table(data=bar_data, columns=["Type", "Count"])
+                bar_plot = wandb.plot.bar(
+                    bar_table,
+                    "Type",
+                    "Count",
+                    title="Exploration vs Exploitation"
+                )
                 wandb.log(
                     {
                         "global_step": step + 1,
@@ -364,41 +359,32 @@ def train_agent(env_name, render=False):
                         "episode_length": episode_length,
                         "mean_td_error": mean_td_error,
                         "mean_q_value": mean_q_value,
-                        "attention_value1": att1,
-                        "attention_value2": att2,
-                        "attention_value3": att3,    # Log attention values for the fixed states
+                        "exploration_exploitation_bar": bar_plot,
                     },
                     step=episode,
                 )
-            #else:
-            #    print(
-            #        f"Episode {episode} - Steps: {step+1}, Reward: {total_reward:.2f}, Loss: {mean_losses:.4f}, "
-            #        f"Q Value: {mean_q_value:.4f}"
-            #    )
 
 
-            if episode % 100 == 0:
-                if DEBUG:
-                    wandb.log(
-                        {
-                            "explored_states": agent.exploration_count,
-                            "exploited_states": agent.exploitation_count,
-                        },
-                        step=episode,
-                    )
-                else:
-                    print(
-                        f"Episode {episode} - Explored: {agent.exploration_count}, Exploited: {agent.exploitation_count}"
-                    )
-                    print(
-                    f"Episode {episode} - Steps: {step+1}, Reward: {total_reward:.2f}, Loss: {mean_losses:.4f}, "
-                    f"Q Value: {mean_q_value:.4f}"
-                )
+            # if episode % 100 == 0:
+            #     if DEBUG:
+            #         wandb.log(
+            #             {
+
+            #             },
+            #             step=episode,
+            #         )
+            #     else:
+            #         print(
+            #             f"Episode {episode} - Explored: {agent.exploration_count}, Exploited: {agent.exploitation_count}"
+            #         )
+            #         print(
+            #         f"Episode {episode} - Steps: {step+1}, Reward: {total_reward:.2f}, Loss: {mean_losses:.4f}, "
+            #         f"Q Value: {mean_q_value:.4f}"
+            #     )
 
 
-                agent.exploration_count = 0
-                agent.exploitation_count = 0
-
+            # agent.exploration_count=0
+            # agent.exploitation_count=0
             state, _ = env.reset()
             total_reward = 0
             losses = []
