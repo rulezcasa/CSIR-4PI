@@ -67,12 +67,12 @@ class ReplayBuffer:
         )
 
 
-    # #optimization - pinned memory for faster transfers
-    #     self.states = self.states.pin_memory()
-    #     self.actions = self.actions.pin_memory()
-    #     self.rewards = self.rewards.pin_memory()
-    #     self.next_states = self.next_states.pin_memory()
-    #     self.dones = self.dones.pin_memory()
+    #optimization - pinned memory for faster transfers
+        self.states = self.states.pin_memory()
+        self.actions = self.actions.pin_memory()
+        self.rewards = self.rewards.pin_memory()
+        self.next_states = self.next_states.pin_memory()
+        self.dones = self.dones.pin_memory()
 
     def add(
         self, state, action, reward, next_state, done
@@ -340,17 +340,6 @@ def train_agent(env_name, render=False):
 
 
             if DEBUG:
-                bar_data = [
-                    ["Explored", agent.exploration_count],
-                    ["Exploited", agent.exploitation_count]
-                ]
-                bar_table = wandb.Table(data=bar_data, columns=["Type", "Count"])
-                bar_plot = wandb.plot.bar(
-                    bar_table,
-                    "Type",
-                    "Count",
-                    title="Exploration vs Exploitation"
-                )
                 wandb.log(
                     {
                         "global_step": step + 1,
@@ -359,7 +348,8 @@ def train_agent(env_name, render=False):
                         "episode_length": episode_length,
                         "mean_td_error": mean_td_error,
                         "mean_q_value": mean_q_value,
-                        "exploration_exploitation_bar": bar_plot,
+                        "No. of States Explored" : agent.exploration_count,
+                        "No. of States Exploit" : agent.exploitation_count,
                     },
                     step=episode,
                 )
@@ -403,7 +393,9 @@ def train_agent(env_name, render=False):
     print(f"Model saved successfully!")
 
     if DEBUG:
-        #wandb.save(model_path)
+
+        
+                #wandb.save(model_path)
         wandb.finish()
     else:
         print("Debug mode disabled, skipping wandb model upload")
@@ -429,9 +421,6 @@ if __name__ == "__main__":
     # Train agent
     train_agent("CartPole-v1")
         
-        
-        
-    
 
  
         
