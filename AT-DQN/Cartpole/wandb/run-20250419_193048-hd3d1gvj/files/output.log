@@ -1,0 +1,19 @@
+Training Progress:   0%|                                                                                                                                                               | 0/200000 [00:00<?, ?it/s]/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/gym/utils/passive_env_checker.py:233: DeprecationWarning: `np.bool8` is a deprecated alias for `np.bool_`.  (Deprecated NumPy 1.24)
+  if not isinstance(terminated, (bool, np.bool8)):
+Training Progress:   9%|█████████████                                                                                                                                     | 17840/200000 [01:38<16:46, 180.93it/s]
+Traceback (most recent call last):
+  File "/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole/AT_DQN_greedy.py", line 434, in <module>
+    train_agent("CartPole-v1")
+  File "/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole/AT_DQN_greedy.py", line 336, in train_agent
+    result = agent.train_step()
+  File "/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole/AT_DQN_greedy.py", line 302, in train_step
+    loss.item(),
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole/AT_DQN_greedy.py", line 434, in <module>
+    train_agent("CartPole-v1")
+  File "/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole/AT_DQN_greedy.py", line 336, in train_agent
+    result = agent.train_step()
+  File "/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole/AT_DQN_greedy.py", line 302, in train_step
+    loss.item(),
+KeyboardInterrupt

@@ -12,6 +12,9 @@ AT-DQN:
   target_update: 1000
   device: "mps"
   initial_attention: 0.9
+  decay_untill: 120_000
+  final_lr: 0.00001
+
 
 Vanilla-DQN:
   epsilon_start: 0.9

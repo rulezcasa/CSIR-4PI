@@ -10,7 +10,7 @@ import yaml
 from datetime import timedelta
 import pdb
 import xxhash
-DEBUG = True
+DEBUG = False
 if DEBUG:
     import wandb
     from wandb import AlertLevel
@@ -68,11 +68,11 @@ class ReplayBuffer:
 
 
     #optimization - pinned memory for faster transfers
-        self.states = self.states.pin_memory()
-        self.actions = self.actions.pin_memory()
-        self.rewards = self.rewards.pin_memory()
-        self.next_states = self.next_states.pin_memory()
-        self.dones = self.dones.pin_memory()
+        # self.states = self.states.pin_memory()
+        # self.actions = self.actions.pin_memory()
+        # self.rewards = self.rewards.pin_memory()
+        # self.next_states = self.next_states.pin_memory()
+        # self.dones = self.dones.pin_memory()
 
     def add(
         self, state, action, reward, next_state, done
@@ -255,7 +255,9 @@ class Agent:
         else:
             self.exploitation_count+=1
             return action_values.argmax(dim=1).item()
-            
+
+
+
     def train_step(self):
         if self.replay_buffer.size < self.check_replay_size:
             return None

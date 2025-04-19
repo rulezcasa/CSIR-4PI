@@ -1,0 +1,16 @@
+{
+  "os": "macOS-15.1.1-arm64-arm-64bit",
+  "python": "CPython 3.10.16",
+  "startedAt": "2025-04-19T17:49:32.656675Z",
+  "program": "/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole/AT_DQN_lrdecay.py",
+  "codePath": "AT-DQN/Cartpole/AT_DQN_lrdecay.py",
+  "git": {
+    "remote": "git@github.com:rulezcasa/CSIR-4PI.git",
+    "commit": "877f19012f264c98e237fdf90d18dd958f9bf451"
+  },
+  "email": "harish.thangaraj03@outlook.com",
+  "root": "/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole",
+  "host": "Harishs-MacBook-Pro.local",
+  "executable": "/Users/casarulez/anaconda3/envs/ATARI-R/bin/python3",
+  "codePathLocal": "AT_DQN_lrdecay.py"
+}

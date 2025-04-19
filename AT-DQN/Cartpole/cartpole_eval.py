@@ -33,7 +33,11 @@ action_space= env.action_space.n
 
 
 model = QNetwork(state_space, action_space).to(device)
-model.load_state_dict(torch.load("/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole/AT_DQN_Models/Vanilla_MSE-v2_model.pth"))  # change filename as needed
+model.load_state_dict(torch.load(
+    "/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole/AT_DQN_Models/vanilla_MSE-v2_model.pth",
+    map_location=torch.device(device)
+))
+
 model.eval()
 
 

@@ -1,0 +1,1 @@
+{"global_step":5801,"mean_td_error":0.07015974628739059,"_step":618,"mean_q_value":1.0766007068101318,"_timestamp":1.745071004987741e+09,"reward":10,"episode_length":10,"_wandb":{"runtime":31},"loss":0.007535980129614472,"_runtime":31.637637}
