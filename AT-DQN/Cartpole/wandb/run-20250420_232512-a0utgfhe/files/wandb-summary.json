@@ -1,1 +1,0 @@
-{"episode_length":42,"Attention network loss":0.03863646540363012,"global_step":65830,"_wandb":{"runtime":579},"mean_q_value":58.18548973908903,"_timestamp":1.7451722920428622e+09,"No. of States Exploit":0,"_runtime":579.612924,"reward":42,"No. of States Explored":65830,"_step":2935,"loss":16.542006532351177,"mean_td_error":1.661497400497042}
