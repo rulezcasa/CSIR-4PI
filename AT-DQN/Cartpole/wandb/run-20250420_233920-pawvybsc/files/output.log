@@ -1,0 +1,83 @@
+Training Progress:   0%|                                                                                                                                                               | 0/200000 [00:00<?, ?it/s]/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/gym/utils/passive_env_checker.py:233: DeprecationWarning: `np.bool8` is a deprecated alias for `np.bool_`.  (Deprecated NumPy 1.24)
+  if not isinstance(terminated, (bool, np.bool8)):
+Training Progress:  17%|████████████████████████▋                                                                                                                         | 33809/200000 [05:05<25:01, 110.72it/s]
+Traceback (most recent call last):
+  File "/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole/AT_DQN_AttentionNet.py", line 342, in <module>
+    train_agent("CartPole-v1")
+  File "/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole/AT_DQN_AttentionNet.py", line 235, in train_agent
+    for step in tqdm(range(total_steps), desc="Training Progress"):
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/tqdm/std.py", line 1191, in __iter__
+    self.update(n - last_print_n)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/tqdm/std.py", line 1242, in update
+    self.refresh(lock_args=self.lock_args)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/tqdm/std.py", line 1347, in refresh
+    self.display()
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/tqdm/std.py", line 1495, in display
+    self.sp(self.__str__() if msg is None else msg)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/tqdm/std.py", line 459, in print_status
+    fp_write('\r' + s + (' ' * max(last_len[0] - len_s, 0)))
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/tqdm/std.py", line 452, in fp_write
+    fp.write(str(s))
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/tqdm/utils.py", line 196, in inner
+    return func(*args, **kwargs)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/wandb/sdk/lib/redirect.py", line 648, in write
+    cb(data)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/wandb/sdk/wandb_run.py", line 2310, in <lambda>
+    lambda data: self._console_raw_callback("stderr", data),
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/wandb/sdk/wandb_run.py", line 393, in wrapper_fn
+    return func(self, *args, **kwargs)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/wandb/sdk/wandb_run.py", line 1442, in _console_raw_callback
+    self._backend.interface.publish_output_raw(name, data)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/wandb/sdk/interface/interface.py", line 763, in publish_output_raw
+    self._publish_output_raw(o)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/wandb/sdk/interface/interface_shared.py", line 79, in _publish_output_raw
+    self._publish(rec)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/wandb/sdk/interface/interface_sock.py", line 47, in _publish
+    self._sock_client.send_record_publish(record)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/wandb/sdk/lib/sock_client.py", line 222, in send_record_publish
+    self.send_server_request(server_req)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/wandb/sdk/lib/sock_client.py", line 154, in send_server_request
+    self._send_message(msg)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/wandb/sdk/lib/sock_client.py", line 146, in _send_message
+    raw_size = msg.ByteSize()
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole/AT_DQN_AttentionNet.py", line 342, in <module>
+    train_agent("CartPole-v1")
+  File "/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole/AT_DQN_AttentionNet.py", line 235, in train_agent
+    for step in tqdm(range(total_steps), desc="Training Progress"):
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/tqdm/std.py", line 1191, in __iter__
+    self.update(n - last_print_n)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/tqdm/std.py", line 1242, in update
+    self.refresh(lock_args=self.lock_args)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/tqdm/std.py", line 1347, in refresh
+    self.display()
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/tqdm/std.py", line 1495, in display
+    self.sp(self.__str__() if msg is None else msg)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/tqdm/std.py", line 459, in print_status
+    fp_write('\r' + s + (' ' * max(last_len[0] - len_s, 0)))
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/tqdm/std.py", line 452, in fp_write
+    fp.write(str(s))
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/tqdm/utils.py", line 196, in inner
+    return func(*args, **kwargs)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/wandb/sdk/lib/redirect.py", line 648, in write
+    cb(data)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/wandb/sdk/wandb_run.py", line 2310, in <lambda>
+    lambda data: self._console_raw_callback("stderr", data),
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/wandb/sdk/wandb_run.py", line 393, in wrapper_fn
+    return func(self, *args, **kwargs)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/wandb/sdk/wandb_run.py", line 1442, in _console_raw_callback
+    self._backend.interface.publish_output_raw(name, data)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/wandb/sdk/interface/interface.py", line 763, in publish_output_raw
+    self._publish_output_raw(o)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/wandb/sdk/interface/interface_shared.py", line 79, in _publish_output_raw
+    self._publish(rec)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/wandb/sdk/interface/interface_sock.py", line 47, in _publish
+    self._sock_client.send_record_publish(record)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/wandb/sdk/lib/sock_client.py", line 222, in send_record_publish
+    self.send_server_request(server_req)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/wandb/sdk/lib/sock_client.py", line 154, in send_server_request
+    self._send_message(msg)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/wandb/sdk/lib/sock_client.py", line 146, in _send_message
+    raw_size = msg.ByteSize()
+KeyboardInterrupt

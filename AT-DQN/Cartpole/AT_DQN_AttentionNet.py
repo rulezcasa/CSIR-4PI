@@ -109,12 +109,11 @@ class AttentionNet(nn.Module):
         self.fc2=nn.Linear(128,64)
         self.fc3=nn.Linear(64,1)
         self.relu=nn.ReLU()
-        self.sigmoid=nn.Sigmoid()
 
     def forward(self, x):
         x = self.relu(self.fc1(x))
         x = self.relu(self.fc2(x))
-        attention=self.sigmoid(self.fc3(x))
+        attention=self.relu(self.fc3(x))
         return attention
     
     
@@ -181,10 +180,9 @@ class Agent:
         td_errors = targets - q_values
         
         td_errors_detached=td_errors.detach()
-        sigmoid_td_errors = torch.sigmoid(td_errors_detached)
         attention_values=self.Attnet(states)
-        att_loss_fn=torch.nn.BCELoss()
-        att_loss=att_loss_fn(sigmoid_td_errors, attention_values)
+        att_loss_fn=torch.nn.MSELoss()
+        att_loss=att_loss_fn(td_errors_detached, attention_values)
         self.att_optimizer.zero_grad()
         att_loss.backward()
 
