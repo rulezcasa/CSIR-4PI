@@ -1,0 +1,44 @@
+{
+  "os": "macOS-15.1.1-arm64-arm-64bit",
+  "python": "CPython 3.10.16",
+  "startedAt": "2025-04-20T17:48:48.298707Z",
+  "program": "/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole/AT_DQN_AttentionNet.py",
+  "codePath": "AT-DQN/Cartpole/AT_DQN_AttentionNet.py",
+  "git": {
+    "remote": "git@github.com:rulezcasa/CSIR-4PI.git",
+    "commit": "48a4a93fb9fc9ada1da63d39d1e5db9dfe1cf1c3"
+  },
+  "email": "harish.thangaraj03@outlook.com",
+  "root": "/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole",
+  "host": "Harishs-MacBook-Pro.local",
+  "executable": "/Users/casarulez/anaconda3/envs/ATARI-R/bin/python3",
+  "codePathLocal": "AT_DQN_AttentionNet.py",
+  "cpu_count": 10,
+  "cpu_count_logical": 10,
+  "disk": {
+    "/": {
+      "total": "294384795648",
+      "used": "278077231104"
+    },
+    "/System/Volumes/Data": {
+      "total": "294384795648",
+      "used": "278077231104"
+    }
+  },
+  "memory": {
+    "total": "17179869184"
+  },
+  "cpu": {
+    "count": 10,
+    "countLogical": 10
+  },
+  "apple": {
+    "name": "Apple M1 Pro",
+    "ecpuCores": 2,
+    "pcpuCores": 8,
+    "gpuCores": 16,
+    "memoryGb": 16,
+    "swapTotalBytes": "3221225472",
+    "ramTotalBytes": "17179869184"
+  }
+}

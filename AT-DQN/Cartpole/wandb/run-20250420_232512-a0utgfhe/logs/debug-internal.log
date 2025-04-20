@@ -1,0 +1,15 @@
+{"time":"2025-04-20T23:25:12.484376+05:30","level":"INFO","msg":"stream: starting","core version":"0.19.6","symlink path":"/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole/wandb/run-20250420_232512-a0utgfhe/logs/debug-core.log"}
+{"time":"2025-04-20T23:25:12.593841+05:30","level":"INFO","msg":"created new stream","id":"a0utgfhe"}
+{"time":"2025-04-20T23:25:12.593885+05:30","level":"INFO","msg":"stream: started","id":"a0utgfhe"}
+{"time":"2025-04-20T23:25:12.593889+05:30","level":"INFO","msg":"handler: started","stream_id":"a0utgfhe"}
+{"time":"2025-04-20T23:25:12.593893+05:30","level":"INFO","msg":"writer: Do: started","stream_id":"a0utgfhe"}
+{"time":"2025-04-20T23:25:12.593959+05:30","level":"INFO","msg":"sender: started","stream_id":"a0utgfhe"}
+{"time":"2025-04-20T23:25:13.06361+05:30","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-04-20T23:34:52.096006+05:30","level":"INFO","msg":"stream: closing","id":"a0utgfhe"}
+{"time":"2025-04-20T23:34:52.096031+05:30","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-04-20T23:34:52.096571+05:30","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2025-04-20T23:34:53.177799+05:30","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-04-20T23:34:53.678647+05:30","level":"INFO","msg":"handler: closed","stream_id":"a0utgfhe"}
+{"time":"2025-04-20T23:34:53.678656+05:30","level":"INFO","msg":"sender: closed","stream_id":"a0utgfhe"}
+{"time":"2025-04-20T23:34:53.678653+05:30","level":"INFO","msg":"writer: Close: closed","stream_id":"a0utgfhe"}
+{"time":"2025-04-20T23:34:53.678741+05:30","level":"INFO","msg":"stream: closed","id":"a0utgfhe"}

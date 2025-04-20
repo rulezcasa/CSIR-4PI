@@ -1,0 +1,35 @@
+Training Progress:   0%|                                                                                                                                                               | 0/200000 [00:00<?, ?it/s]/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/gym/utils/passive_env_checker.py:233: DeprecationWarning: `np.bool8` is a deprecated alias for `np.bool_`.  (Deprecated NumPy 1.24)
+  if not isinstance(terminated, (bool, np.bool8)):
+Training Progress:   2%|███▌                                                                                                                                             | 4999/200000 [00:00<00:14, 13352.92it/s]
+Traceback (most recent call last):
+  File "/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole/AT_DQN_AttentionNet.py", line 342, in <module>
+    train_agent("CartPole-v1")
+  File "/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole/AT_DQN_AttentionNet.py", line 241, in train_agent
+    result = agent.train_step()
+  File "/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole/AT_DQN_AttentionNet.py", line 187, in train_step
+    att_loss=att_loss_fn(sigmoid_td_errors, attention_values)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/torch/nn/modules/loss.py", line 697, in forward
+    return F.binary_cross_entropy(
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/torch/nn/functional.py", line 3554, in binary_cross_entropy
+    return torch._C._nn.binary_cross_entropy(input, target, weight, reduction_enum)
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole/AT_DQN_AttentionNet.py", line 342, in <module>
+    train_agent("CartPole-v1")
+  File "/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole/AT_DQN_AttentionNet.py", line 241, in train_agent
+    result = agent.train_step()
+  File "/Volumes/Harish/CSIR Research/Codespace/CSIR-4PI/AT-DQN/Cartpole/AT_DQN_AttentionNet.py", line 187, in train_step
+    att_loss=att_loss_fn(sigmoid_td_errors, attention_values)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/torch/nn/modules/loss.py", line 697, in forward
+    return F.binary_cross_entropy(
+  File "/Users/casarulez/anaconda3/envs/ATARI-R/lib/python3.10/site-packages/torch/nn/functional.py", line 3554, in binary_cross_entropy
+    return torch._C._nn.binary_cross_entropy(input, target, weight, reduction_enum)
+KeyboardInterrupt

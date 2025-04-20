@@ -1,0 +1,1 @@
+{"_timestamp":1.7451716132771132e+09,"_step":1384,"_wandb":{"runtime":285},"mean_q_value":23.575552498357865,"loss":3.1464564204216003,"mean_td_error":0.8261999500682577,"reward":16,"global_step":31572,"No. of States Explored":31572,"episode_length":16,"_runtime":285.234055,"No. of States Exploit":0}

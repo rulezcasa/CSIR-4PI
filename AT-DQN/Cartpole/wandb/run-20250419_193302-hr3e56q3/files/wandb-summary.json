@@ -1,1 +1,0 @@
-{"_timestamp":1.7450718466893618e+09,"_runtime":464.375086,"loss":0.006845902593340725,"reward":8,"mean_q_value":5.0385991461225785,"global_step":69305,"_wandb":{"runtime":464},"episode_length":8,"_step":7401,"mean_td_error":0.033765751926694065}

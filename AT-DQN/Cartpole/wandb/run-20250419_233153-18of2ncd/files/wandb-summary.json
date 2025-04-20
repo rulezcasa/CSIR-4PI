@@ -1,1 +1,0 @@
-{"global_step":6931,"_step":297,"mean_q_value":1.970614356517389,"reward":37,"episode_length":37,"No. of States Explored":6931,"_wandb":{"runtime":104},"mean_td_error":0.08762647863477468,"lr":6.90345e-05,"loss":0.04251919938503085,"_timestamp":1.745085814879018e+09,"No. of States Exploit":0,"_runtime":104.489497}
