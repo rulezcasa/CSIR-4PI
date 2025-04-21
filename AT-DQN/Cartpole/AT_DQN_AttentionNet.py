@@ -109,11 +109,12 @@ class AttentionNet(nn.Module):
         self.fc2=nn.Linear(128,64)
         self.fc3=nn.Linear(64,1)
         self.relu=nn.ReLU()
+        self.sigmoid=nn.Sigmoid()
 
     def forward(self, x):
         x = self.relu(self.fc1(x))
         x = self.relu(self.fc2(x))
-        attention=self.relu(self.fc3(x))
+        attention=self.sigmoid(self.fc3(x))
         return attention
     
     
@@ -135,7 +136,7 @@ class Agent:
         fixed_states_indices = [0, 1, 2]
         self.tau=config["AT-DQN"]["tau"]
         self.Attnet=AttentionNet(state_space).to(device)
-        self.att_optimizer = optim.Adam(self.q_network.parameters(), lr=self.lr)
+        self.att_optimizer = optim.Adam(self.q_network.parameters(), lr=0.00025)
         
     
         
@@ -181,7 +182,7 @@ class Agent:
         
         td_errors_detached=td_errors.detach()
         attention_values=self.Attnet(states)
-        att_loss_fn=torch.nn.MSELoss()
+        att_loss_fn=torch.nn.BCELoss()
         att_loss=att_loss_fn(td_errors_detached, attention_values)
         self.att_optimizer.zero_grad()
         att_loss.backward()
@@ -203,7 +204,9 @@ class Agent:
             td_errors.abs().squeeze().cpu().tolist(),
             q_values.squeeze().cpu().tolist(),
             att_loss.item(),
+            attention_values.detach().cpu().tolist()
         )
+    
         
     def add_experience(self, state, action, reward, next_state, done):
         self.replay_buffer.add(state, action, reward, next_state, done)        
@@ -219,6 +222,7 @@ def train_agent(env_name, render=False):
     td_errors_per_episode = []
     q_values = []
     att_losses=[]
+    att_values=[]
     
     env = gym.make(env_name)
     state, _ = env.reset()
@@ -240,11 +244,12 @@ def train_agent(env_name, render=False):
         state = next_frame
         total_reward += reward
         if result is not None:
-            loss, td_error, qvalue, att_loss = result
+            loss, td_error, qvalue, att_loss, att_value = result
             losses.append(loss)
             td_errors_per_episode.extend(td_error)
             q_values.extend(qvalue)
             att_losses.append(att_loss)
+            att_values.extend(att_value)
 
         if done:
             episode += 1
@@ -254,6 +259,7 @@ def train_agent(env_name, render=False):
             )
             mean_q_value = np.mean(q_values) if q_values else 0.0
             mean_att_losses = np.mean(att_losses) if att_losses else 0.0
+            mean_att_values=np.mean(att_values) if att_values else 0.0
 
 
             if DEBUG:
@@ -268,6 +274,7 @@ def train_agent(env_name, render=False):
                         "No. of States Explored" : agent.exploration_count,
                         "No. of States Exploit" : agent.exploitation_count,
                         "Attention network loss": mean_att_losses,
+                        "Mean Attention values": mean_att_values,
                     },
                     step=episode,
                 )

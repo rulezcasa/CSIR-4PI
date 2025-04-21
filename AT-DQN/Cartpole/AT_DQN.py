@@ -119,7 +119,6 @@ class StateAttentionTrackerLRU:
         self.hash_to_index={} #dicitonary holding a state-attention pairs
         self.last_access = torch.zeros(capacity, dtype=torch.long, device=device) #pytorch tensor that stores the access time of each state (stored as index corresponding to hash_to_index)
         self.access_counter = 0  #global counter tracking when which state is accessed
-        self.track_indices = track_indices if track_indices is not None else []  # List of fixed indices to track attention
 
     def get_state_hash(self, state):  # Function to hash state
         if isinstance(state, torch.Tensor):  
@@ -136,12 +135,14 @@ class StateAttentionTrackerLRU:
         self.access_counter+=1
 
         if state_hash in self.hash_to_index: #if state already exists
-            idx=self.hash_to_index[state_hash]
-            self.last_access[idx]=self.access_counter
+            idx=self.hash_to_index[state_hash] #index using the state_hash and retrieve the index
+            self.last_access[idx]=self.access_counter #update last access of that state
             return idx
     
         if self.current_index<self.capacity: #if capacity not full and state doesn't exist
             idx=self.current_index
+            self.hash_to_index[state_hash] = idx
+            self.last_access[idx]= self.access_counter
             self.current_index+=1   #return the current_index
             return idx
         
