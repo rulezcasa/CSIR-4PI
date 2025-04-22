@@ -10,7 +10,7 @@ import yaml
 from datetime import timedelta
 import pdb
 import xxhash
-DEBUG = True
+DEBUG = False
 if DEBUG:
     import wandb
     from wandb import AlertLevel
@@ -24,6 +24,8 @@ if config['AT-DQN']['device']=='mps':
 if config['AT-DQN']['device']=='cuda':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.backends.cudnn.benchmark = True
+if config['AT-DQN']['device']=='cpu':
+    device = torch.device("cpu")
 
 #defining the Q-network
 class QNetwork(nn.Module):
@@ -68,11 +70,11 @@ class ReplayBuffer:
 
 
     #optimization - pinned memory for faster transfers
-        self.states = self.states.pin_memory()
-        self.actions = self.actions.pin_memory()
-        self.rewards = self.rewards.pin_memory()
-        self.next_states = self.next_states.pin_memory()
-        self.dones = self.dones.pin_memory()
+        # self.states = self.states.pin_memory()
+        # self.actions = self.actions.pin_memory()
+        # self.rewards = self.rewards.pin_memory()
+        # self.next_states = self.next_states.pin_memory()
+        # self.dones = self.dones.pin_memory()
 
     def add(
         self, state, action, reward, next_state, done
@@ -101,14 +103,6 @@ class ReplayBuffer:
             self.next_states[indices].to(self.device),
             self.dones[indices].to(self.device),
         )
-    def update_attention_weights(self, indices, attention_values):
-        if isinstance(indices, torch.Tensor):
-            indices = indices.cpu().numpy()  # Ensure indexing works on CPU tensors
-
-        if attention_values.dim() == 1:
-            attention_values = attention_values.unsqueeze(1)  # (batch_size, 1)
-
-            self.attention_weight[indices] = attention_values.detach().cpu()
 
 class StateAttentionTrackerLRU:
     def __init__(self, capacity, device):
@@ -181,8 +175,19 @@ class StateAttentionTrackerLRU:
         indices = self.batch_get_indices(states)
         return self.attention_values[indices]
     
+     #debugging code :
+    def check_old_new(self, state):
+        state_hash=self.get_state_hash(state)
+        if state_hash in self.hash_to_index:
+            return True
+        else:
+            return False
+    
     def get_attention(self, state):  # get attention value for a single state index (used to act)
+        boolean=self.check_old_new(state)
         idx = self.get_state_index(state)
+        if boolean==True:
+            print("old state", self.attention_values[idx].item())
         return self.attention_values[idx]
     
     def update_attention(self, states, weights):
@@ -192,8 +197,9 @@ class StateAttentionTrackerLRU:
                 weights, dtype=torch.float32, device=self.device
             )
         indices = self.batch_get_indices(states) #retrieve indices of states to be updated (in turn calls get_state_index to handle LRU)
-
+        #print("Attention values after update:", self.attention_values[indices])
         self.attention_values[indices]=weights
+        #print("Attention values after update:", self.attention_values[indices])
         #self.normalize_attention()
     
     def normalize_attention(self):
@@ -207,11 +213,10 @@ class StateAttentionTrackerLRU:
             return
         used_values.sub_(min_val).div_(max_val - min_val) #other min mas normalize
     
-    #def compute_attention(self, td_errors):
+    # def compute_attention(self, td_errors):
     #    weights = torch.where(td_errors > config["AT-DQN"]["tau"], 0.9, 0.1)
     #    return weights
          
-    
     def compute_attention(self, td_errors):
         weights=td_errors.abs() + 1e-6
         return weights
@@ -221,9 +226,6 @@ class StateAttentionTrackerLRU:
         self.attention_values = self.attention_values.to(device)
         self.last_access = self.last_access.to(device)
         return self
-
-
-        
 
     
 class Agent:
@@ -256,7 +258,7 @@ class Agent:
         
         attention=self.attention_tracker.get_attention(state).item()
 
-        if attention > self.tau: #CHECK! not using importance weight atm
+        if attention > self.tau: 
             self.exploration_count+=1 
             return np.random.randint(self.action_space), attention
         else:
@@ -357,7 +359,8 @@ def train_agent(env_name, render=False):
             std_att_value = np.std(att_values) if att_values else 0.0
             unique_states, old_states=agent.return_state_count()
             
-            #print("mean att:",mean_att_value)
+            #if step>5000:
+                #print("att:",att_values)
 
             if DEBUG:
                 wandb.log(

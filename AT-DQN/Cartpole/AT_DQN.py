@@ -24,6 +24,8 @@ if config['AT-DQN']['device']=='mps':
 if config['AT-DQN']['device']=='cuda':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.backends.cudnn.benchmark = True
+if config['AT-DQN']['device']=='cpu':
+    device = torch.device("cpu")
 
 #defining the Q-network
 class QNetwork(nn.Module):
@@ -141,8 +143,6 @@ class StateAttentionTrackerLRU:
     
         if self.current_index<self.capacity: #if capacity not full and state doesn't exist
             idx=self.current_index
-            self.hash_to_index[state_hash] = idx
-            self.last_access[idx]= self.access_counter
             self.current_index+=1   #return the current_index
             return idx
         
@@ -206,7 +206,6 @@ class StateAttentionTrackerLRU:
         weights = torch.where(td_errors > 0.4, 0.9, 0.1)
         return weights
          
-    
     # def compute_attention(self, td_errors):
     #     weights=td_errors.abs() + 1e-6
     #     return weights
@@ -216,9 +215,6 @@ class StateAttentionTrackerLRU:
         self.attention_values = self.attention_values.to(device)
         self.last_access = self.last_access.to(device)
         return self
-
-
-        
 
     
 class Agent:
@@ -237,7 +233,7 @@ class Agent:
         self.check_replay_size=config['AT-DQN']['warmup'] #warmup steps
         self.step_count=0
         fixed_states_indices = [0, 1, 2]
-        self.attention_tracker=StateAttentionTrackerLRU(config["AT-DQN"]["LRU"], device, track_indices=fixed_states_indices)
+        self.attention_tracker=StateAttentionTrackerLRU(config["AT-DQN"]["LRU"], device)
         self.tau=config["AT-DQN"]["tau"]
         
     
@@ -250,13 +246,14 @@ class Agent:
             action_values = self.q_network(state_tensor)
         self.q_network.train()
 
-        if self.attention_tracker.get_attention(state).item() > self.tau: #CHECK! not using importance weight atm
+        attention=self.attention_tracker.get_attention(state).item()
+
+        if attention > self.tau: #CHECK! not using importance weight atm
             self.exploration_count+=1 
             return np.random.randint(self.action_space)
         else:
             self.exploitation_count+=1
             return action_values.argmax(dim=1).item()
-
 
 
     def train_step(self):
@@ -408,7 +405,7 @@ if __name__ == "__main__":
     if DEBUG:
         wandb.init(
             project="AT-DQN",
-            name="cartpole_ATDQN_v2",
+            name="cartpole_ATDQN_cont_test",
             config={
                 "total_steps": config['AT-DQN']['T'],
                 "LRU": config['AT-DQN']['LRU'],
