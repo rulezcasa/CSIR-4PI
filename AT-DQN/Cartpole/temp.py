@@ -119,6 +119,8 @@ class StateAttentionTrackerLRU:
         self.hash_to_index={} #dicitonary holding a state-attention pairs
         self.last_access = torch.zeros(capacity, dtype=torch.long, device=device) #pytorch tensor that stores the access time of each state (stored as index corresponding to hash_to_index)
         self.access_counter = 0  #global counter tracking when which state is accessed
+        self.unique_state_counter=0
+        self.old_state_counter=0
 
     def get_state_hash(self, state):  # Function to hash state
         if isinstance(state, torch.Tensor):  
@@ -126,7 +128,7 @@ class StateAttentionTrackerLRU:
                 state_bytes = state.cpu().numpy().tobytes()
             else:
                 state_bytes = state.numpy().tobytes()
-        else:  # if array then
+        else:  # if array then	
             state_bytes = np.asarray(state).tobytes()
         return xxhash.xxh3_64(state_bytes).hexdigest()
     
@@ -137,6 +139,7 @@ class StateAttentionTrackerLRU:
         if state_hash in self.hash_to_index: #if state already exists
             idx=self.hash_to_index[state_hash]
             self.last_access[idx]=self.access_counter
+            self.old_state_counter+=1
             return idx
     
         if self.current_index<self.capacity: #if capacity not full and state doesn't exist
@@ -144,6 +147,7 @@ class StateAttentionTrackerLRU:
             self.hash_to_index[state_hash] = idx #map that index to the new state hassh
             self.last_access[idx]= self.access_counter #update last access of that index
             self.current_index+=1   #return the current_index
+            self.unique_state_counter+=1
             return idx
         
         else:  #if LRU full
@@ -161,6 +165,7 @@ class StateAttentionTrackerLRU:
 
         self.hash_to_index[state_hash] = idx #new state's hash is assigned to that index
         self.last_access[idx] = self.access_counter #last access to current access counter
+        self.unique_state_counter+=1
 
         return idx  # returns index after removing and adding new
     
@@ -202,14 +207,14 @@ class StateAttentionTrackerLRU:
             return
         used_values.sub_(min_val).div_(max_val - min_val) #other min mas normalize
     
-    def compute_attention(self, td_errors):
-        weights = torch.where(td_errors > 0.4, 0.9, 0.1)
-        return weights
+    #def compute_attention(self, td_errors):
+    #    weights = torch.where(td_errors > config["AT-DQN"]["tau"], 0.9, 0.1)
+    #    return weights
          
     
-    #def compute_attention(self, td_errors):
-    #    weights=td_errors.abs() + 1e-6
-    #    return weights
+    def compute_attention(self, td_errors):
+        weights=td_errors.abs() + 1e-6
+        return weights
     
     def to(self, device):
         self.device = device
@@ -295,7 +300,10 @@ class Agent:
         )
         
     def add_experience(self, state, action, reward, next_state, done):
-        self.replay_buffer.add(state, action, reward, next_state, done)        
+        self.replay_buffer.add(state, action, reward, next_state, done)
+    
+    def return_state_count(self):
+    	return self.attention_tracker.unique_state_counter, self.attention_tracker.old_state_counter        
         
 def train_agent(env_name, render=False):
     total_steps=config['AT-DQN']['T']
@@ -308,6 +316,7 @@ def train_agent(env_name, render=False):
     td_errors_per_episode = []
     q_values = []
     att_values=[]
+    unique_states=0
 
     
     env = gym.make(env_name)
@@ -346,6 +355,7 @@ def train_agent(env_name, render=False):
             max_att_value = np.max(att_values) if att_values else 0.0
             min_att_value = np.min(att_values) if att_values else 0.0
             std_att_value = np.std(att_values) if att_values else 0.0
+            unique_states, old_states=agent.return_state_count()
             
             #print("mean att:",mean_att_value)
 
@@ -364,6 +374,8 @@ def train_agent(env_name, render=False):
                         "std attention" : std_att_value,
                         "No. of States Explored" : agent.exploration_count,
                         "No. of States Exploited" : agent.exploitation_count,
+                        "Unique states:" : unique_states,
+                        "old states:" : old_states,
                     },
                     step=episode,
                 )
@@ -419,7 +431,7 @@ if __name__ == "__main__":
     if DEBUG:
         wandb.init(
             project="AT-DQN",
-            name="cartpole_ATDQN_discrete_attplot",
+            name="cartpole_ATDQN_continous_attplot",
             config={
                 "total_steps": config['AT-DQN']['T'],
                 "LRU": config['AT-DQN']['LRU'],
