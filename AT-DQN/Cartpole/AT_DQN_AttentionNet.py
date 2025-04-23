@@ -24,6 +24,8 @@ if config['AT-DQN']['device']=='mps':
 if config['AT-DQN']['device']=='cuda':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.backends.cudnn.benchmark = True
+if config['AT-DQN']['device']=='cpu':
+    device = torch.device("cpu")
 
 #defining the Q-network
 class QNetwork(nn.Module):
@@ -102,7 +104,7 @@ class ReplayBuffer:
             self.dones[indices].to(self.device),
         )
 
-class AttentionNet(nn.Module):
+class AttentionNet(nn.Module): #attention network
     def __init__(self, state_shape):
         super(AttentionNet, self).__init__()
         self.fc1=nn.Linear(*state_shape, 128)
@@ -136,7 +138,7 @@ class Agent:
         fixed_states_indices = [0, 1, 2]
         self.tau=config["AT-DQN"]["tau"]
         self.Attnet=AttentionNet(state_space).to(device)
-        self.att_optimizer = optim.Adam(self.q_network.parameters(), lr=0.00025)
+        self.att_optimizer = optim.Adam(self.q_network.parameters(), lr=0.0001)
         
     
         
@@ -162,6 +164,8 @@ class Agent:
         else:
             self.exploitation_count+=1
             return action_values.argmax(dim=1).item()
+    
+    
 
 
 
@@ -180,12 +184,16 @@ class Agent:
         q_values = self.q_network(states).gather(1, actions.long())
         td_errors = targets - q_values
         
-        td_errors_detached=td_errors.detach()
+        td_errors_detached=td_errors.detach().abs()
+        scale=10
+        normalized = torch.sigmoid(td_errors_detached / scale)  # range (0,1)
+        binary_labels = (normalized > 0.4).float()   
         attention_values=self.Attnet(states)
         att_loss_fn=torch.nn.BCELoss()
-        att_loss=att_loss_fn(td_errors_detached, attention_values)
+        att_loss=att_loss_fn(attention_values, binary_labels)
         self.att_optimizer.zero_grad()
         att_loss.backward()
+        self.att_optimizer.step()
 
         loss_fn = torch.nn.MSELoss()
         loss = loss_fn(q_values, targets)
@@ -204,7 +212,8 @@ class Agent:
             td_errors.abs().squeeze().cpu().tolist(),
             q_values.squeeze().cpu().tolist(),
             att_loss.item(),
-            attention_values.detach().cpu().tolist()
+            attention_values.detach().cpu().tolist(),
+            normalized.squeeze().cpu().tolist()
         )
     
         
@@ -223,6 +232,7 @@ def train_agent(env_name, render=False):
     q_values = []
     att_losses=[]
     att_values=[]
+    normalized_tds=[]
     
     env = gym.make(env_name)
     state, _ = env.reset()
@@ -244,12 +254,13 @@ def train_agent(env_name, render=False):
         state = next_frame
         total_reward += reward
         if result is not None:
-            loss, td_error, qvalue, att_loss, att_value = result
+            loss, td_error, qvalue, att_loss, att_value, normalized_td = result
             losses.append(loss)
             td_errors_per_episode.extend(td_error)
             q_values.extend(qvalue)
             att_losses.append(att_loss)
             att_values.extend(att_value)
+            normalized_tds.extend(normalized_td)
 
         if done:
             episode += 1
@@ -260,6 +271,8 @@ def train_agent(env_name, render=False):
             mean_q_value = np.mean(q_values) if q_values else 0.0
             mean_att_losses = np.mean(att_losses) if att_losses else 0.0
             mean_att_values=np.mean(att_values) if att_values else 0.0
+            mean_norm_td=np.mean(normalized_tds) if att_values else 0.0
+
 
 
             if DEBUG:
@@ -275,6 +288,7 @@ def train_agent(env_name, render=False):
                         "No. of States Exploit" : agent.exploitation_count,
                         "Attention network loss": mean_att_losses,
                         "Mean Attention values": mean_att_values,
+                        "Mean Norm TD valules": mean_norm_td,
                     },
                     step=episode,
                 )
@@ -318,8 +332,6 @@ def train_agent(env_name, render=False):
     print(f"Model saved successfully!")
 
     if DEBUG:
-
-        
                 #wandb.save(model_path)
         wandb.finish()
     else:
