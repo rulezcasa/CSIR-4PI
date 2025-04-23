@@ -111,12 +111,12 @@ class AttentionNet(nn.Module): #attention network
         self.fc2=nn.Linear(128,64)
         self.fc3=nn.Linear(64,1)
         self.relu=nn.ReLU()
-        self.sigmoid=nn.Sigmoid()
+        self.hardtanh=nn.Hardtanh(0,1)
 
     def forward(self, x):
         x = self.relu(self.fc1(x))
         x = self.relu(self.fc2(x))
-        attention=self.sigmoid(self.fc3(x))
+        attention=self.hardtanh(self.fc3(x))
         return attention
     
     
@@ -138,7 +138,7 @@ class Agent:
         fixed_states_indices = [0, 1, 2]
         self.tau=config["AT-DQN"]["tau"]
         self.Attnet=AttentionNet(state_space).to(device)
-        self.att_optimizer = optim.Adam(self.q_network.parameters(), lr=0.0001)
+        self.att_optimizer = optim.Adam(self.Attnet.parameters(), lr=0.0001)
         
     
         
@@ -156,14 +156,17 @@ class Agent:
             self.Attnet.eval()
             with torch.no_grad():
                 attention=self.Attnet(state_tensor)
-            self.Attnet.train()
+            self.Attnet.train()	
 
+        if isinstance(attention, torch.Tensor):
+            attention = attention.cpu().item() 
+    		
         if attention > self.tau: 
             self.exploration_count+=1 
-            return np.random.randint(self.action_space)
+            return np.random.randint(self.action_space), attention
         else:
             self.exploitation_count+=1
-            return action_values.argmax(dim=1).item()
+            return action_values.argmax(dim=1).item(), attention
     
     
 
@@ -185,12 +188,10 @@ class Agent:
         td_errors = targets - q_values
         
         td_errors_detached=td_errors.detach().abs()
-        scale=10
-        normalized = torch.sigmoid(td_errors_detached / scale)  # range (0,1)
-        binary_labels = (normalized > 0.4).float()   
+        normalized = (torch.tanh(td_errors_detached / td_errors_detached.max() + 1e-8) + 1) / 2 
         attention_values=self.Attnet(states)
-        att_loss_fn=torch.nn.BCELoss()
-        att_loss=att_loss_fn(attention_values, binary_labels)
+        att_loss_fn=torch.nn.MSELoss()
+        att_loss=att_loss_fn(attention_values, normalized)
         self.att_optimizer.zero_grad()
         att_loss.backward()
         self.att_optimizer.step()
@@ -233,6 +234,7 @@ def train_agent(env_name, render=False):
     att_losses=[]
     att_values=[]
     normalized_tds=[]
+    att_retrieved_list=[]
     
     env = gym.make(env_name)
     state, _ = env.reset()
@@ -246,7 +248,7 @@ def train_agent(env_name, render=False):
     
     for step in tqdm(range(total_steps), desc="Training Progress"):
         episode_length += 1
-        action = agent.act(state)
+        action, att_retrieved = agent.act(state)
         next_frame, reward, terminated, truncated, _ = env.step(action)
         done = terminated or truncated
         agent.add_experience(state, action, reward, next_frame, done)
@@ -261,6 +263,7 @@ def train_agent(env_name, render=False):
             att_losses.append(att_loss)
             att_values.extend(att_value)
             normalized_tds.extend(normalized_td)
+            att_retrieved_list.append(att_retrieved)
 
         if done:
             episode += 1
@@ -271,7 +274,11 @@ def train_agent(env_name, render=False):
             mean_q_value = np.mean(q_values) if q_values else 0.0
             mean_att_losses = np.mean(att_losses) if att_losses else 0.0
             mean_att_values=np.mean(att_values) if att_values else 0.0
-            mean_norm_td=np.mean(normalized_tds) if att_values else 0.0
+            mean_norm_td=np.mean(normalized_tds) if normalized_tds else 0.0
+            mean_attr=np.mean(att_retrieved_list) if att_retrieved_list else 0.0
+            
+            #print("td:", mean_td_error)
+            #print("norm td:", mean_norm_td)
 
 
 
@@ -287,8 +294,9 @@ def train_agent(env_name, render=False):
                         "No. of States Explored" : agent.exploration_count,
                         "No. of States Exploit" : agent.exploitation_count,
                         "Attention network loss": mean_att_losses,
-                        "Mean Attention values": mean_att_values,
-                        "Mean Norm TD valules": mean_norm_td,
+                        "Mean Predicted Attention values (sampling based)": mean_att_values,
+                        "Mean retrieved Attention values (action based)": mean_attr,
+                        "Mean Norm TD values (targets)": mean_norm_td,
                     },
                     step=episode,
                 )
