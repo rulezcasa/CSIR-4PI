@@ -143,7 +143,7 @@ class Agent:
     
         
     def act(self, state):
-        if self.replay_buffer.size < self.check_replay_size:
+        if self.replay_buffer.size < 80000:
             attention=0.9
         
         else:
@@ -188,7 +188,12 @@ class Agent:
         td_errors = targets - q_values
         
         td_errors_detached=td_errors.detach().abs()
-        normalized = (torch.tanh(td_errors_detached / td_errors_detached.max() + 1e-8) + 1) / 2 
+        td_min = td_errors_detached.min().item()
+        td_max = td_errors_detached.max().item()
+        range_eps = 1e-8
+        range_val = max(td_max - td_min, range_eps)
+
+        normalized = (td_errors_detached - td_min) / range_val * 3
         attention_values=self.Attnet(states)
         att_loss_fn=torch.nn.MSELoss()
         att_loss=att_loss_fn(attention_values, normalized)
@@ -300,6 +305,11 @@ def train_agent(env_name, render=False):
                     },
                     step=episode,
                 )
+            
+            # print("Mean Predicted Attention values (sampling based)", mean_att_values)
+            # print( "Mean Norm TD values (targets)", mean_norm_td)
+            # print( "Mean retrieved Attention values (action based", mean_attr)
+
 
 
             # if episode % 100 == 0:
