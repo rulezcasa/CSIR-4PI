@@ -237,7 +237,7 @@ class StateAttentionTrackerLRU:
         used_values.sub_(min_val).div_(max_val - min_val) #other min mas normalize
     
     # def compute_attention(self, td_errors):
-    #    weights = torch.where(td_errors > 1.5, 0.9, 0.1)
+    #    weights = torch.where(td_errors > config["AT-DQN"]["tau"], 0.9, 0.1)
     #    return weights
          
     def compute_attention(self, td_errors):
@@ -268,9 +268,11 @@ class Agent:
         self.step_count=0
         self.attention_tracker=StateAttentionTrackerLRU(config["AT-DQN"]["LRU"], device)
         self.tau=config["AT-DQN"]["tau"]
+        self.tau_start = 0.5        # threshold min
+        self.tau_end   = 2.0        # threshold max
         
         
-    def act(self, state):
+    def act(self, state, step_count):
         state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(device)
         
         self.q_network.eval()
@@ -280,12 +282,16 @@ class Agent:
         
         attention=self.attention_tracker.get_attention(state).item()
 
-        if attention > self.tau: 
+        frac = min(1.0, step_count / 150_000)
+
+        threshold = self.tau_start + frac * (self.tau_end - self.tau_start)
+
+        if attention > threshold: 
             self.exploration_count+=1 
-            return np.random.randint(self.action_space), attention
+            return np.random.randint(self.action_space), attention, threshold
         else:
             self.exploitation_count+=1
-            return action_values.argmax(dim=1).item(), attention
+            return action_values.argmax(dim=1).item(), attention, threshold
             
     def train_step(self):
         if self.replay_buffer.size < self.check_replay_size:
@@ -361,7 +367,7 @@ def train_agent(env_name, render=False):
     
     for step in tqdm(range(total_steps), desc="Training Progress"):
         episode_length += 1
-        action, att = agent.act(state)
+        action, att, threshold = agent.act(state, step)
         next_frame, reward, terminated, truncated, _ = env.step(action)
         done = terminated or truncated
         agent.add_experience(state, action, reward, next_frame, done)
@@ -408,6 +414,7 @@ def train_agent(env_name, render=False):
                         "old states updated:" : old_states,
                         "Unique states (action):" : new_actions,
                         "old states (action):" : old_actions,
+                        "theshold:" : threshold,
                     },
                     step=episode,
                 )
@@ -441,7 +448,7 @@ if __name__ == "__main__":
     if DEBUG:
         wandb.init(
             project="AT-DQN",
-            name="cartpole_ATDQN_fp8_huber2",
+            name="cartpole_ATDQN_anneal_lr",
             config={
                 "total_steps": config['AT-DQN']['T'],
                 "LRU": config['AT-DQN']['LRU'],

@@ -116,7 +116,7 @@ class AttentionNet(nn.Module): #attention network
     def forward(self, x):
         x = self.relu(self.fc1(x))
         x = self.relu(self.fc2(x))
-        attention=self.hardtanh(self.fc3(x))
+        attention=self.relu(self.fc3(x))
         return attention
     
     
@@ -142,17 +142,17 @@ class Agent:
         
     
         
-    def act(self, state):
-        if self.replay_buffer.size < 80000:
-            attention=0.9
-        
-        else:
-            state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(device)
-            self.q_network.eval()
-            with torch.no_grad():
-                action_values = self.q_network(state_tensor)
-            self.q_network.train()
+    def act(self, state, step_count):
+        state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(device)
+        self.q_network.eval()
+        with torch.no_grad():
+            action_values = self.q_network(state_tensor)
+        self.q_network.train()
 
+        
+        if step_count < 120000:
+            attention=config["AT-DQN"]["initial_attention"]
+        else:
             self.Attnet.eval()
             with torch.no_grad():
                 attention=self.Attnet(state_tensor)
@@ -193,15 +193,16 @@ class Agent:
         range_eps = 1e-8
         range_val = max(td_max - td_min, range_eps)
 
-        normalized = (td_errors_detached - td_min) / range_val * 3
+        # normalized = (td_errors_detached - td_min) / range_val
+        normalized=td_errors_detached #not noramlized just a temp variable
         attention_values=self.Attnet(states)
-        att_loss_fn=torch.nn.MSELoss()
+        att_loss_fn=torch.nn.HuberLoss()
         att_loss=att_loss_fn(attention_values, normalized)
         self.att_optimizer.zero_grad()
         att_loss.backward()
         self.att_optimizer.step()
 
-        loss_fn = torch.nn.MSELoss()
+        loss_fn = torch.nn.HuberLoss()
         loss = loss_fn(q_values, targets)
         self.optimizer.zero_grad()
         loss.backward()
@@ -253,13 +254,14 @@ def train_agent(env_name, render=False):
     
     for step in tqdm(range(total_steps), desc="Training Progress"):
         episode_length += 1
-        action, att_retrieved = agent.act(state)
+        action, att_retrieved = agent.act(state, step)
         next_frame, reward, terminated, truncated, _ = env.step(action)
         done = terminated or truncated
         agent.add_experience(state, action, reward, next_frame, done)
         result = agent.train_step()
         state = next_frame
         total_reward += reward
+        att_retrieved_list.append(att_retrieved)
         if result is not None:
             loss, td_error, qvalue, att_loss, att_value, normalized_td = result
             losses.append(loss)
@@ -268,7 +270,6 @@ def train_agent(env_name, render=False):
             att_losses.append(att_loss)
             att_values.extend(att_value)
             normalized_tds.extend(normalized_td)
-            att_retrieved_list.append(att_retrieved)
 
         if done:
             episode += 1
@@ -306,38 +307,17 @@ def train_agent(env_name, render=False):
                     step=episode,
                 )
             
-            # print("Mean Predicted Attention values (sampling based)", mean_att_values)
-            # print( "Mean Norm TD values (targets)", mean_norm_td)
-            # print( "Mean retrieved Attention values (action based", mean_attr)
-
-
-
-            # if episode % 100 == 0:
-            #     if DEBUG:
-            #         wandb.log(
-            #             {
-
-            #             },
-            #             step=episode,
-            #         )
-            #     else:
-            #         print(
-            #             f"Episode {episode} - Explored: {agent.exploration_count}, Exploited: {agent.exploitation_count}"
-            #         )
-            #         print(
-            #         f"Episode {episode} - Steps: {step+1}, Reward: {total_reward:.2f}, Loss: {mean_losses:.4f}, "
-            #         f"Q Value: {mean_q_value:.4f}"
-            #     )
-
-
-            # agent.exploration_count=0
-            # agent.exploitation_count=0
             state, _ = env.reset()
             total_reward = 0
             losses = []
             episode_length = 0
             td_errors_per_episode = []
             q_values = []
+            att_values=[]
+            att_losses=[]
+            att_retrieved_list=[]
+            normalized_tds=[]
+
 
 
     print("Training complete!")
@@ -360,7 +340,7 @@ if __name__ == "__main__":
     if DEBUG:
         wandb.init(
             project="AT-DQN",
-            name="cartpole_ATDQN_AttNet",
+            name="cartpole_ATDQN_AttNet_NoNorm2",
             config={
                 "total_steps": config['AT-DQN']['T'],
                 "LRU": config['AT-DQN']['LRU'],

@@ -4,8 +4,8 @@ AT-DQN:
   warmup: 5000
   beta_end: 1.0
   sma_window: 10
-  tau: 0.4
-  T: 300000
+  tau: 0.2
+  T: 200000
   gamma: 0.99
   lr: 0.00007
   LRU: 250000
